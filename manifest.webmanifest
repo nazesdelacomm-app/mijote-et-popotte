@@ -1,0 +1,21 @@
+{
+  "name": "Popote & Mijote",
+  "short_name": "Popote&Mijote",
+  "description": "Mes recettes, mon menu de la semaine et ma liste de courses.",
+  "lang": "fr",
+  "start_url": "./#semaine",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF8F1",
+  "theme_color": "#FFF8F1",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Liste de courses", "url": "./#courses", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Mes recettes", "url": "./#recettes", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+  ]
+}
