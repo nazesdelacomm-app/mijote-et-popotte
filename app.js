@@ -117,12 +117,14 @@
     attrs = attrs || '';
     return '<div class="stepper"><button data-act="' + act + '" data-d="-1" ' + attrs + ' aria-label="Moins">−</button><b>' + v + '</b><button data-act="' + act + '" data-d="1" ' + attrs + ' aria-label="Plus">+</button></div>';
   }
+  const FAV = '⭐ Favoris';
+  const filterTags = () => (Object.values(db.recipes).some(r => r.fav) ? [FAV] : []).concat(db.tags);
   function chips(selected, act, all) {
     return '<div class="chips">' + (all || db.tags).map(t => '<button class="chip' + (selected.includes(t) ? ' on' : '') + '" data-act="' + act + '" data-v="' + esc(t) + '">' + esc(t) + '</button>').join('') + '</div>';
   }
   function filterRecipes(q, tags) {
     const f = PM.fold(q).trim();
-    return recipeList().filter(r => (!tags.length || tags.every(t => (r.tags || []).includes(t))) &&
+    return recipeList().filter(r => (!tags.length || tags.every(t => t === FAV ? r.fav : (r.tags || []).includes(t))) &&
       (!f || PM.fold(r.title).includes(f) || (r.ingredients || []).some(i => PM.fold(i.name).includes(f))));
   }
   function metaLine(r) {
@@ -159,7 +161,8 @@
     }
     const portions = entries.reduce((s, e) => s + e.people, 0);
     h += '<div class="summary"><span>' + (entries.length ? plural(entries.length, 'repas', 'repas') + ' · ' + plural(portions, 'portion') : 'Aucun repas prévu') + '</span>' +
-      (entries.length ? '<a class="btn small soft" href="#courses">🛒 Liste de courses</a>' : '') + '</div>';
+      '<span class="sum-btns"><button class="btn small dice" data-act="randomMenu">🎲 ' + (entries.length ? 'Aléatoire' : 'Menu aléatoire') + '</button>' +
+      (entries.length ? '<a class="btn small soft" href="#courses">🛒 Courses</a>' : '') + '</span></div>';
     for (let d = 0; d < 7; d++) {
       const day = addDays(mon, d); const dk = keyOf(day);
       h += '<section class="day' + (dk === today ? ' today' : '') + (dk < today ? ' past' : '') + '"><h2>' + DAYS[d] + ' <span>' + fmtShort(day) + '</span>' + (dk === today ? '<em>aujourd\'hui</em>' : '') + '</h2>';
@@ -187,7 +190,7 @@
       return h;
     }
     h += '<div class="search"><input type="search" data-in="q" placeholder="Chercher (titre, ingrédient…)" value="' + esc(ui.q) + '"></div>';
-    h += chips(ui.tags, 'filterTag');
+    h += chips(ui.tags, 'filterTag', filterTags());
     h += '<div id="rec-list" class="rlist">' + recipeCards() + '</div>';
     h += '<button class="fab" data-act="addRecipe">+ Ajouter</button>';
     return h;
@@ -195,7 +198,7 @@
   function recipeCards() {
     const list = filterRecipes(ui.q, ui.tags);
     if (!list.length) return '<p class="muted center pad">Aucune recette ne correspond.</p>';
-    return list.map(r => '<a class="rcard" href="#recette-' + r.id + '" style="--c:' + colOf(r) + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + esc(r.title) + '</b><small>' + esc(metaLine(r) || plural((r.ingredients || []).length, 'ingrédient')) + '</small></span><span class="chev">›</span></a>').join('');
+    return list.map(r => '<a class="rcard" href="#recette-' + r.id + '" style="--c:' + colOf(r) + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + (r.fav ? '⭐ ' : '') + esc(r.title) + '</b><small>' + esc(metaLine(r) || plural((r.ingredients || []).length, 'ingrédient')) + '</small></span><span class="chev">›</span></a>').join('');
   }
 
   // ---------- Détail recette ----------
@@ -209,6 +212,7 @@
   }
   function hero(r, back) {
     return '<div class="hero" style="--c:' + colOf(r) + '"><button class="round back" data-act="back" data-to="' + back + '" aria-label="Retour">‹</button>' +
+      (r.id && db.recipes[r.id] ? '<button class="round fav' + (r.fav ? ' on' : '') + '" data-act="toggleFav" data-id="' + r.id + '" aria-label="Favori">' + (r.fav ? '★' : '☆') + '</button>' : '') +
       '<div class="hero-emo">' + r.emoji + '</div><h1>' + esc(r.title) + '</h1>' +
       '<div class="meta">' + (r.time ? '<span>⏱ ' + fmtTime(r.time) + '</span>' : '') + (r.tags || []).map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '</div></div>';
   }
@@ -284,7 +288,7 @@
     let h = '<div class="cook" style="--c:' + colOf(r) + '"><header class="cook-top"><button class="round" data-act="cookExit" aria-label="Quitter">×</button><div><small>Mode cuisine</small><h1>' + r.emoji + ' ' + esc(r.title) + '</h1></div></header>';
     h += '<p class="wake">' + ('wakeLock' in navigator ? '💡 L\'écran reste allumé' : '💡 Pense à garder l\'écran allumé') + '</p>';
     h += '<details class="card" open><summary><span>Ingrédients</span><span class="pp" onclick="event.preventDefault()">' + stepper(c.people, 'cookPeople') + '<small>pers.</small></span></summary>' + ingList(r, c.people, 'cook') + '</details>';
-    h += '<ol class="cook-steps">' + (r.steps || []).map((s, k) => '<li data-act="cookStep" data-i="' + k + '" class="' + (c.step[k] ? 'done' : k === current ? 'current' : '') + '"><span class="num">' + (c.step[k] ? '✓' : k + 1) + '</span><p>' + esc(s) + '</p></li>').join('') + '</ol>';
+    h += '<ol class="cook-steps">' + (r.steps || []).map((s, k) => '<li data-act="cookStep" data-i="' + k + '" class="' + (c.step[k] ? 'done' : k === current ? 'current' : '') + '"><span class="num">' + (c.step[k] ? '✓' : k + 1) + '</span><div class="st"><p>' + esc(s) + '</p>' + timerBtn(s, k) + '</div></li>').join('') + '</ol>';
     if (current === -1 && r.steps && r.steps.length) h += '<div class="bravo">Bon appétit ! 🍽️</div>';
     h += '<button class="btn primary big wide" data-act="cookExit">Terminer</button></div>';
     return h;
@@ -343,6 +347,8 @@
     h += '<div class="mrow"><span class="mi">👥</span><span class="mt"><b>Personnes par défaut</b><small>Pour les nouveaux repas</small></span>' + stepper(db.settings.people, 'defPeople') + '</div>';
     const old = !db.settings.lastExport || (Date.now() - db.settings.lastExport > 30 * 864e5);
     h += '<a href="#sauvegarde"><span class="mi">💾</span><span class="mt"><b>Sauvegarde</b><small>' + (db.settings.lastExport ? 'Dernière : ' + new Date(db.settings.lastExport).toLocaleDateString('fr-FR') : 'Jamais faite') + '</small></span>' + (old && Object.keys(db.recipes).length ? '<span class="badge">!</span>' : '<span class="chev">›</span>') + '</a>';
+    h += '<button class="mrow" data-act="loadStarter"><span class="mi">📚</span><span class="mt"><b>Recettes de départ</b><small>Ajouter les idées du livre de départ</small></span><span class="chev">›</span></button>';
+    h += '<button class="mrow" data-act="shareApp"><span class="mi">💌</span><span class="mt"><b>Partager l\'app</b><small>Envoyer le lien à des amis</small></span><span class="chev">›</span></button>';
     if (ui.installEvt && !isStandalone()) h += '<button class="mrow" data-act="install"><span class="mi">📲</span><span class="mt"><b>Installer l\'app</b><small>Sur l\'écran d\'accueil</small></span><span class="chev">›</span></button>';
     h += '</div><p class="foot">' + LOGO + '<br>Popote &amp; Mijote<br><small>Tes recettes restent sur ce téléphone.</small></p>';
     return h;
@@ -484,6 +490,8 @@
   A.back = el => { if (ui.nav > 0) history.back(); else go('#' + (el.dataset.to || 'semaine')); };
   A.weekMove = el => { ui.week = keyOf(addDays(dateOf(ui.week), 7 * +el.dataset.d)); rerender(); };
   A.weekMenu = () => openSheet(() => '<h3 class="sheet-title">Semaine du ' + weekLabel(ui.week) + '</h3><div class="sheet-menu">' +
+    '<button data-act="weekShare">📤 Partager le menu de la semaine</button>' +
+    '<button data-act="weekRandom">🎲 Menu aléatoire</button>' +
     '<button data-act="weekToday">📍 Revenir à la semaine à planifier</button>' +
     '<button data-act="weekHistory">🗓 Reprendre un menu passé</button>' +
     '<button data-act="weekClear" class="danger-text">🧹 Vider cette semaine</button></div>');
@@ -516,7 +524,7 @@
     if (!Object.keys(db.recipes).length) return h + '<p class="muted">Tu n\'as pas encore de recette.</p><button class="btn primary wide" data-act="pickerNewRecipe">+ Ajouter une recette</button>';
     h += '<div class="row-between"><span>Personnes</span>' + stepper(p.people, 'pickPeople') + '</div>';
     h += '<div class="search"><input type="search" data-in="pickQ" placeholder="Chercher une recette" value="' + esc(p.q) + '"></div>';
-    h += '<div id="pick-tags">' + chips(p.tags, 'pickTag') + '</div>';
+    h += '<div id="pick-tags">' + chips(p.tags, 'pickTag', filterTags()) + '</div>';
     h += '<button class="btn surprise wide" data-act="surprise">🎲 Surprends-moi</button>';
     h += '<div id="pick-list">' + pickerList() + '</div>';
     return h;
@@ -531,11 +539,11 @@
         '<div class="btn-row"><button class="btn ghost" data-act="surprise">Une autre</button><button class="btn primary" data-act="pickRecipe" data-id="' + r.id + '">Ajouter</button></div></div>';
     }
     if (!list.length) return h + '<p class="muted center pad">Aucune recette ne correspond.</p>';
-    return h + '<div class="rlist">' + list.map(r => '<button class="rcard" style="--c:' + colOf(r) + '" data-act="pickRecipe" data-id="' + r.id + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + esc(r.title) + '</b><small>' + esc([metaLine(r), lastUse(r.id)].filter(Boolean).join('  ·  ')) + '</small></span><span class="plus">+</span></button>').join('') + '</div>';
+    return h + '<div class="rlist">' + list.map(r => '<button class="rcard" style="--c:' + colOf(r) + '" data-act="pickRecipe" data-id="' + r.id + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + (r.fav ? '⭐ ' : '') + esc(r.title) + '</b><small>' + esc([metaLine(r), lastUse(r.id)].filter(Boolean).join('  ·  ')) + '</small></span><span class="plus">+</span></button>').join('') + '</div>';
   }
   A.addMeal = el => { ui.picker = { sk: el.dataset.slot, people: db.settings.people, q: '', tags: [], suggest: null, replace: null }; openSheet(pickerSheet); };
   A.pickPeople = el => { ui.picker.people = Math.max(1, Math.min(30, ui.picker.people + +el.dataset.d)); el.parentNode.querySelector('b').textContent = ui.picker.people; };
-  A.pickTag = el => { const t = el.dataset.v, a = ui.picker.tags; ui.picker.tags = a.includes(t) ? a.filter(x => x !== t) : a.concat(t); $('#pick-tags').innerHTML = chips(ui.picker.tags, 'pickTag'); ui.picker.suggest = null; $('#pick-list').innerHTML = pickerList(); };
+  A.pickTag = el => { const t = el.dataset.v, a = ui.picker.tags; ui.picker.tags = a.includes(t) ? a.filter(x => x !== t) : a.concat(t); $('#pick-tags').innerHTML = chips(ui.picker.tags, 'pickTag', filterTags()); ui.picker.suggest = null; $('#pick-list').innerHTML = pickerList(); };
   A.surprise = () => {
     const p = ui.picker;
     const list = filterRecipes(p.q, p.tags);
@@ -561,7 +569,7 @@
     const r = db.recipes[it.rid]; const [d, m] = sk.split('-');
     return '<div class="sheet-head"><div><small>' + DAYS[d] + ' · ' + (m === 'midi' ? 'Midi' : 'Soir') + '</small><h3>' + r.emoji + ' ' + esc(r.title) + '</h3></div><button class="round ghost" data-act="closeSheet" aria-label="Fermer">×</button></div>' +
       '<div class="row-between"><span>Personnes</span>' + stepper(it.people, 'mealPeople') + '</div>' +
-      '<div class="sheet-menu"><button data-act="mealOpen">📖 Voir la recette</button><button data-act="mealCook">👩‍🍳 Mode cuisine</button><button data-act="mealReplace">🔄 Remplacer</button><button data-act="mealRemove" class="danger-text">Retirer du menu</button></div>';
+      '<div class="sheet-menu"><button data-act="mealOpen">📖 Voir la recette</button><button data-act="mealCook">👩‍🍳 Mode cuisine</button><button data-act="mealReroll">🎲 Une autre idée</button><button data-act="mealReplace">🔄 Choisir une autre recette</button><button data-act="mealRemove" class="danger-text">Retirer du menu</button></div>';
   }
   const mealItem = () => getWeek(ui.week).slots[ui.meal.sk][ui.meal.i];
   A.mealMenu = el => { ui.meal = { sk: el.dataset.slot, i: +el.dataset.i }; openSheet(mealSheet); };
@@ -716,6 +724,158 @@
     toast('Sauvegarde téléchargée ✓'); rerender();
   };
 
+
+  // ================= MENU ALÉATOIRE =================
+  const PASTA_RE = /(^|[^a-z])(pates?|spaghetti|tagliatelle|penne|fusilli|farfalle|macaroni|coquillette|lasagne|tortellini|ravioli|cannelloni|gnocchi|linguine|rigatoni|orecchiette|crozet|casarecce)/;
+  function isPasta(r) {
+    const t = s => { const f = PM.fold(s); return PASTA_RE.test(f) && !/pates? (brisee|feuilletee|a pizza|a brioche|sablee|a tarte)|pate de curry|pate a tartiner/.test(f); };
+    return t(r.title) || (r.ingredients || []).some(i => t(i.name));
+  }
+  const isQuick = r => (r.time && r.time <= 30) || (r.tags || []).includes('Rapide');
+  const rType = r => { const t = r.tags || []; return t.includes('Poisson') ? 'poisson' : t.includes('Viande') ? 'viande' : t.includes('Végé') ? 'vege' : 'autre'; };
+  function rndOpts() { const s = db.settings; return { quick: s.rndQuick !== false, kids: !!s.rndKids }; }
+  function weekIds(wk, skipSk, skipI) {
+    const w = db.weeks[wk]; const ids = [];
+    if (w) for (const [sk, items] of Object.entries(w.slots)) items.forEach((it, i) => { if (!(sk === skipSk && i === skipI)) ids.push(it.rid); });
+    return ids;
+  }
+  function pickRandom(sk, opts, exclude, skipI) {
+    const weekday = +sk.split('-')[0] < 5;
+    const ids = weekIds(ui.week, sk, skipI);
+    const inWeek = new Set(ids);
+    const recs = ids.map(id => db.recipes[id]).filter(Boolean);
+    const pastaCount = recs.filter(isPasta).length;
+    const types = {}; for (const r of recs) types[rType(r)] = (types[rType(r)] || 0) + 1;
+    let pool = recipeList().filter(r => !(r.tags || []).some(t => t === 'Dessert' || t === 'Apéro') && !(exclude && exclude.has(r.id)) && (r.ingredients || []).length);
+    if (opts.kids) { const k = pool.filter(r => (r.tags || []).includes('Enfants')); if (k.length) pool = k; }
+    const quickOk = r => !weekday || !opts.quick || isQuick(r);
+    const rules = [
+      r => !inWeek.has(r.id) && !usedRecently(r.id, ui.week) && quickOk(r) && !(isPasta(r) && pastaCount >= 1),
+      r => !inWeek.has(r.id) && quickOk(r) && !(isPasta(r) && pastaCount >= 1),
+      r => !inWeek.has(r.id) && quickOk(r),
+      r => !inWeek.has(r.id),
+      () => true,
+    ];
+    for (const rule of rules) {
+      const cand = pool.filter(rule);
+      if (!cand.length) continue;
+      const month = dateOf(ui.week).getMonth(); const winter = month >= 9 || month <= 2;
+      const season = r => { const t = r.tags || []; return (winter && t.includes('Été') && !t.includes('Hiver')) || (!winter && t.includes('Hiver') && !t.includes('Été')) ? .3 : 1; };
+      const wts = cand.map(r => (r.fav ? 3 : 1) * season(r) * ((r.tags || []).includes('Soupe') ? .6 : 1) / (1 + (types[rType(r)] || 0)));
+      let x = Math.random() * wts.reduce((a, b) => a + b, 0);
+      for (let i = 0; i < cand.length; i++) { x -= wts[i]; if (x <= 0) return cand[i]; }
+      return cand[cand.length - 1];
+    }
+    return null;
+  }
+  function slotState(sk) { const w = db.weeks[ui.week]; const items = (w && w.slots[sk]) || []; if (!items.length) return 'vide'; return items.every(it => it.rnd) ? 'rnd' : 'prevu'; }
+  A.randomMenu = () => {
+    const saved = db.settings.rndSlots || ['0-soir', '1-soir', '2-soir', '3-soir', '4-soir', '5-midi', '5-soir', '6-midi', '6-soir'];
+    ui.rnd = { slots: saved.filter(sk => slotState(sk) !== 'prevu'), people: db.settings.people };
+    openSheet(randomSheet);
+  };
+  A.weekRandom = () => closeSheet(() => setTimeout(A.randomMenu, 30));
+  function randomSheet() {
+    const r = ui.rnd; const o = rndOpts(); const mon = dateOf(ui.week);
+    let h = '<div class="sheet-head"><div><small>Semaine du ' + weekLabel(ui.week) + '</small><h3>🎲 Menu aléatoire</h3></div><button class="round ghost" data-act="closeSheet" aria-label="Fermer">×</button></div>';
+    h += '<p class="muted small">Choisis les repas à proposer. Ce que tu as déjà prévu est gardé.</p><div class="rnd-grid">';
+    for (let d = 0; d < 7; d++) {
+      h += '<div class="rnd-row"><span><b>' + DAYS[d].slice(0, 3) + '</b> ' + addDays(mon, d).getDate() + '</span>';
+      for (const [m, l] of MEALS) {
+        const sk = d + '-' + m; const st = slotState(sk);
+        h += st === 'prevu' ? '<span class="rnd-chip done">✓ prévu</span>' : '<button class="rnd-chip' + (r.slots.includes(sk) ? ' on' : '') + '" data-act="rndSlot" data-v="' + sk + '">' + l + (st === 'rnd' ? ' 🎲' : '') + '</button>';
+      }
+      h += '</div>';
+    }
+    h += '</div><div class="rnd-quick"><button class="link" data-act="rndPreset" data-v="soirs">Tous les soirs</button><button class="link" data-act="rndPreset" data-v="tout">Tout</button><button class="link" data-act="rndPreset" data-v="rien">Rien</button></div>';
+    h += '<div class="toggles"><button class="toggle' + (o.quick ? ' on' : '') + '" data-act="rndToggle" data-v="rndQuick"><span>⚡ Plats rapides en semaine</span><i></i></button>' +
+      '<button class="toggle' + (o.kids ? ' on' : '') + '" data-act="rndToggle" data-v="rndKids"><span>🧒 Spécial enfants</span><i></i></button></div>';
+    h += '<div class="row-between"><span>Personnes par repas</span>' + stepper(r.people, 'rndPeople') + '</div>';
+    h += '<button class="btn primary wide big" data-act="rndGo">' + (r.slots.length ? 'Proposer ' + plural(r.slots.length, 'repas', 'repas') : 'Choisis au moins un repas') + '</button>';
+    return h;
+  }
+  A.rndSlot = el => { const sk = el.dataset.v, a = ui.rnd.slots; ui.rnd.slots = a.includes(sk) ? a.filter(x => x !== sk) : a.concat(sk); drawSheet(); };
+  A.rndPreset = el => {
+    const all = []; for (let d = 0; d < 7; d++) for (const [m] of MEALS) all.push(d + '-' + m);
+    const v = el.dataset.v; ui.rnd.slots = (v === 'rien' ? [] : all.filter(sk => v === 'tout' || sk.endsWith('soir'))).filter(sk => slotState(sk) !== 'prevu'); drawSheet();
+  };
+  A.rndToggle = el => { const k = el.dataset.v; db.settings[k] = k === 'rndQuick' ? !(db.settings[k] !== false) : !db.settings[k]; save(); drawSheet(); };
+  A.rndPeople = el => { ui.rnd.people = Math.max(1, Math.min(30, ui.rnd.people + +el.dataset.d)); drawSheet(); };
+  A.rndGo = () => {
+    const r = ui.rnd; if (!r.slots.length) return;
+    const order = []; for (let d = 0; d < 7; d++) for (const [m] of MEALS) if (r.slots.includes(d + '-' + m)) order.push(d + '-' + m);
+    const w = getWeek(ui.week, true); const opts = rndOpts();
+    for (const sk of order) { if (w.slots[sk] && w.slots[sk].every(it => it.rnd)) delete w.slots[sk]; }
+    let n = 0;
+    for (const sk of order) { const rec = pickRandom(sk, opts); if (rec) { (w.slots[sk] = w.slots[sk] || []).push({ rid: rec.id, people: r.people, rnd: true }); n++; } }
+    db.settings.rndSlots = order;
+    save(); closeSheet(() => { rerender(); toast(n ? '🎲 ' + plural(n, 'repas proposé', 'repas proposés') + ' · touche un plat pour le changer' : 'Pas assez de recettes'); });
+  };
+  A.mealReroll = () => {
+    const it = mealItem(); const rec = pickRandom(ui.meal.sk, rndOpts(), new Set([it.rid]), ui.meal.i);
+    if (!rec) { toast('Pas d\'autre idée avec ces critères'); return; }
+    it.rid = rec.id; it.rnd = true; save(); drawSheet(); rerender(); toast(rec.emoji + ' ' + rec.title);
+  };
+
+  // ================= PARTAGE DU MENU =================
+  function menuText() {
+    const w = db.weeks[ui.week]; const mon = dateOf(ui.week);
+    const L = ['🍽️ Menu de la semaine du ' + weekLabel(ui.week)];
+    for (let d = 0; d < 7; d++) {
+      const lines = [];
+      for (const [m, l] of MEALS) {
+        const items = ((w && w.slots[d + '-' + m]) || []).map(it => db.recipes[it.rid]).filter(Boolean);
+        if (items.length) lines.push('   ' + l + ' : ' + items.map(r => r.emoji + ' ' + r.title).join(' + '));
+      }
+      if (lines.length) { L.push('', DAYS[d] + ' ' + fmtShort(addDays(mon, d))); L.push(...lines); }
+    }
+    return L.join('\n');
+  }
+  A.weekShare = () => closeSheet(() => {
+    if (!weekEntries(ui.week).length) { toast('Aucun repas prévu cette semaine'); return; }
+    shareOrCopy({ title: 'Menu de la semaine', text: menuText() }, 'Menu copié ✓');
+  });
+
+  // ================= FAVORIS =================
+  A.toggleFav = el => { const r = db.recipes[el.dataset.id]; r.fav = !r.fav; r.updated = Date.now(); save(); rerender(); toast(r.fav ? '⭐ Ajoutée aux favoris' : 'Retirée des favoris'); };
+
+  // ================= MINUTEURS =================
+  function stepMinutes(s) {
+    const f = PM.fold(s); let m;
+    if ((m = f.match(/(\d+)\s*h(?:eures?)?(?:\s*(\d{1,2}))?(?![a-z])/))) return +m[1] * 60 + (m[2] ? +m[2] : 0);
+    if ((m = f.match(/(\d+)\s*(?:a|-|ou)\s*(\d+)\s*(?:min|mn)/))) return +m[2];
+    if ((m = f.match(/(\d+)\s*(?:min|mn)/))) return +m[1];
+    return null;
+  }
+  function timerBtn(s, k) { const n = stepMinutes(s); return n && n <= 600 ? '<button class="timer-btn" data-act="startTimer" data-min="' + n + '" data-label="Étape ' + (k + 1) + '">⏱ Lancer ' + fmtTime(n) + '</button>' : ''; }
+  const timers = []; let actx = null, ringT = null;
+  const tbar = document.createElement('div'); tbar.id = 'timerbar'; document.body.appendChild(tbar);
+  const mmss = t => { const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return (h ? h + ':' + pad(m) : m) + ':' + pad(s); };
+  function beep() {
+    try {
+      const t0 = actx.currentTime;
+      [0, .3, .6].forEach(dt => { const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = 880; g.gain.setValueAtTime(.25, t0 + dt); g.gain.exponentialRampToValueAtTime(.001, t0 + dt + .25); o.connect(g).connect(actx.destination); o.start(t0 + dt); o.stop(t0 + dt + .26); });
+    } catch (e) { }
+  }
+  function ring(t) {
+    toast('⏰ ' + t.label + ' : c\'est prêt !');
+    try { if (navigator.vibrate) navigator.vibrate([500, 250, 500, 250, 500]); } catch (e) { }
+    if (!ringT) { let n = 0; beep(); ringT = setInterval(() => { if (++n > 40 || !timers.some(x => x.done)) { clearInterval(ringT); ringT = null; return; } beep(); }, 1500); }
+  }
+  function drawTimers() {
+    if (!timers.length) { tbar.className = ''; tbar.innerHTML = ''; document.body.classList.remove('has-timers'); return; }
+    document.body.classList.add('has-timers'); tbar.className = 'on';
+    tbar.innerHTML = timers.map(t => { const left = Math.max(0, Math.ceil((t.end - Date.now()) / 1000)); return '<div class="tm' + (t.done ? ' ring' : '') + '"><span class="tl">⏱ ' + esc(t.label) + '</span><b>' + (t.done ? 'Prêt !' : mmss(left)) + '</b><button data-act="stopTimer" data-id="' + t.id + '">' + (t.done ? 'OK' : 'Annuler') + '</button></div>'; }).join('');
+  }
+  setInterval(() => { if (!timers.length) return; for (const t of timers) if (!t.done && Date.now() >= t.end) { t.done = true; ring(t); } drawTimers(); }, 1000);
+  A.startTimer = el => {
+    try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) { }
+    const r = ui.cook && db.recipes[ui.cook.id];
+    timers.push({ id: uid(), label: el.dataset.label + (r ? ' · ' + r.title : ''), end: Date.now() + +el.dataset.min * 60000, done: false });
+    drawTimers(); toast('⏱ Minuteur lancé : ' + fmtTime(+el.dataset.min));
+  };
+  A.stopTimer = el => { const i = timers.findIndex(t => t.id === el.dataset.id); if (i > -1) timers.splice(i, 1); drawTimers(); };
+
   // ================= SAISIES =================
   const I = {};
   I.q = el => { ui.q = el.value; $('#rec-list').innerHTML = recipeCards(); };
@@ -731,20 +891,32 @@
     const i = ui.draft.ings[+el.dataset.i]; i.name = el.value;
     if (!i.catManual) { i.cat = PM.categorize(el.value); const s = el.parentNode.querySelector('.c'); if (s) s.value = i.cat; }
   };
+  function mergeData(d) {
+    if (!d || !d.recipes) throw new Error('format');
+    let n = 0;
+    for (const [id, r] of Object.entries(d.recipes)) { if (!db.recipes[id]) n++; db.recipes[id] = Object.assign({}, r, db.recipes[id] && db.recipes[id].updated > r.updated ? db.recipes[id] : {}); }
+    for (const [k, w] of Object.entries(d.weeks || {})) if (!db.weeks[k]) db.weeks[k] = w;
+    for (const p of d.pantry || []) if (!db.pantry.some(x => PM.fold(x) === PM.fold(p))) db.pantry.push(p);
+    for (const t of d.tags || []) if (!db.tags.includes(t)) db.tags.push(t);
+    save(); return n;
+  }
   I.importFile = async el => {
     const f = el.files && el.files[0]; if (!f) return;
-    try {
-      const d = JSON.parse(await f.text());
-      if (!d || !d.recipes) throw new Error('format');
-      let n = 0;
-      for (const [id, r] of Object.entries(d.recipes)) { if (!db.recipes[id]) n++; db.recipes[id] = Object.assign({}, r, db.recipes[id] && db.recipes[id].updated > r.updated ? db.recipes[id] : {}); }
-      for (const [k, w] of Object.entries(d.weeks || {})) if (!db.weeks[k]) db.weeks[k] = w;
-      for (const p of d.pantry || []) if (!db.pantry.some(x => PM.fold(x) === PM.fold(p))) db.pantry.push(p);
-      for (const t of d.tags || []) if (!db.tags.includes(t)) db.tags.push(t);
-      save(); toast(plural(n, 'recette ajoutée', 'recettes ajoutées') + ' ✓'); rerender();
-    } catch (e) { toast('Fichier de sauvegarde illisible'); }
+    try { const n = mergeData(JSON.parse(await f.text())); toast(plural(n, 'recette ajoutée', 'recettes ajoutées') + ' ✓'); rerender(); }
+    catch (e) { toast('Fichier de sauvegarde illisible'); }
     el.value = '';
   };
+  // recettes de départ (fichier recettes.json à côté de l'app)
+  async function loadStarter() { const r = await fetch('recettes.json', { cache: 'no-cache' }); if (!r.ok) throw new Error('absent'); return mergeData(await r.json()); }
+  async function seedIfNeeded() {
+    if (db.settings.seeded || Object.keys(db.recipes).length) return;
+    try { const n = await loadStarter(); db.settings.seeded = true; save(); render(true); if (n) toast('📚 ' + n + ' recettes de départ chargées'); } catch (e) { }
+  }
+  A.loadStarter = () => confirmSheet('Ajouter les recettes de départ ?', 'Les recettes du livre de départ qui ne sont pas déjà dans ton appli seront ajoutées. Tes recettes et tes modifications sont conservées.', 'Ajouter', async () => {
+    try { const n = await loadStarter(); db.settings.seeded = true; save(); toast(n ? plural(n, 'recette ajoutée', 'recettes ajoutées') + ' ✓' : 'Tu as déjà toutes les recettes de départ'); rerender(); }
+    catch (e) { toast('Pas de connexion : réessaie plus tard'); }
+  });
+  A.shareApp = () => shareOrCopy({ title: 'Popote & Mijote', text: 'Popote & Mijote : mes recettes, le menu de la semaine et la liste de courses qui se fait toute seule. Ouvre le lien dans Chrome (ou Safari sur iPhone) et installe-la sur ton écran d\'accueil :', url: appUrl() }, 'Lien de l\'appli copié ✓');
 
   // ================= ÉVÉNEMENTS =================
   document.addEventListener('click', e => {
@@ -772,5 +944,6 @@
     navigator.serviceWorker.register('sw.js').catch(() => { });
   }
   render();
+  seedIfNeeded();
   window.__pm = { db: () => db, ui };
 })();

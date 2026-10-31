@@ -311,3 +311,41 @@ textarea { height: auto; padding: 10px 12px; line-height: 1.5; resize: vertical;
 #toast { position: fixed; left: 50%; bottom: calc(var(--tabbar-h) + var(--safe-b) + 18px); transform: translate(-50%, 20px); background: var(--ink); color: #FFF8F1; padding: 11px 18px; border-radius: 99px; font-weight: 600; font-size: 14.5px; opacity: 0; pointer-events: none; transition: all .25s; z-index: 60; white-space: nowrap; max-width: 92vw; overflow: hidden; text-overflow: ellipsis; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 body.full #toast { bottom: 90px; }
+
+/* ---- v2 : menu aléatoire, favoris, minuteurs ---- */
+.summary { flex-wrap: wrap; }
+.sum-btns { display: flex; gap: 6px; }
+.btn.dice { background: linear-gradient(120deg, #FFE7A8, #FFD1E0 55%, #DCD3FF); border: 0; color: var(--ink); }
+.hero .fav { position: absolute; right: 12px; top: 12px; z-index: 1; font-size: 22px; color: var(--ink-3); }
+.hero .fav.on { color: #F2A93B; }
+.rnd-grid { background: var(--surface); border-radius: 18px; padding: 4px 12px; margin: 8px 0; }
+.rnd-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+.rnd-row:first-child { border-top: 0; }
+.rnd-row > span:first-child { color: var(--ink-2); font-size: 14.5px; }
+.rnd-row b { color: var(--ink); font-weight: 600; }
+.rnd-chip { height: 38px; border-radius: 12px; border: 1.5px dashed #E8D9CB; color: var(--ink-3); font-weight: 600; font-size: 14px; display: grid; place-items: center; }
+.rnd-chip.on { background: var(--ink); border: 1.5px solid var(--ink); color: #FFF8F1; }
+.rnd-chip.done { border: 0; background: var(--mint); color: #2C6B50; font-size: 13px; }
+.rnd-quick { display: flex; gap: 16px; justify-content: flex-end; margin: 0 4px 10px; }
+.link { color: var(--accent); font-weight: 600; font-size: 14px; }
+.toggles { display: flex; flex-direction: column; background: var(--surface); border-radius: 18px; overflow: hidden; margin-bottom: 4px; }
+.toggle { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px; border-top: 1px solid var(--line); text-align: left; font-weight: 500; }
+.toggle:first-child { border-top: 0; }
+.toggle i { width: 44px; height: 26px; border-radius: 99px; background: #E9DED4; position: relative; transition: background .2s; flex: none; }
+.toggle i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: left .2s; }
+.toggle.on i { background: #7FD1AE; }
+.toggle.on i::after { left: 21px; }
+.cook-steps .st { flex: 1; min-width: 0; }
+.timer-btn { margin-top: 10px; background: #fff; border: 1.5px solid var(--line); border-radius: 99px; padding: 7px 14px; font-weight: 700; font-size: 15px; color: var(--accent); }
+.cook-steps li.current .timer-btn { border-color: transparent; }
+#timerbar { position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h) + var(--safe-b) + 8px); z-index: 40; display: none; flex-direction: column; gap: 6px; padding: 0 12px; max-width: 560px; margin: 0 auto; pointer-events: none; }
+#timerbar.on { display: flex; }
+body.full #timerbar { bottom: calc(12px + var(--safe-b)); }
+.tm { pointer-events: auto; display: flex; align-items: center; gap: 10px; background: var(--ink); color: #FFF8F1; border-radius: 18px; padding: 10px 10px 10px 16px; box-shadow: 0 8px 24px rgba(47, 42, 53, .25); }
+.tm .tl { flex: 1; min-width: 0; font-size: 13.5px; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.tm button { background: rgba(255, 255, 255, .15); color: #fff; border-radius: 12px; padding: 8px 12px; font-weight: 600; font-size: 14px; }
+.tm.ring { background: var(--accent); animation: pulse 1s infinite; }
+@keyframes pulse { 50% { transform: scale(1.02); } }
+body.has-timers.full { padding-bottom: 110px; }
+body.has-timers #toast { bottom: calc(var(--tabbar-h) + var(--safe-b) + 90px); }

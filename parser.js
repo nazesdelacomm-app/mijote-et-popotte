@@ -34,13 +34,13 @@
   ];
   const RULES = [
     ['cf', 'pate feuilletee|pate brisee|pate sablee|pate a pizza|pate a tarte|gnocchi|pates fraiches|tofu|houmous'],
-    ['ep', "lait de coco|creme de coco|tomates? pelee|tomates? concassee|concentre|coulis|passata|puree de tomate|sucre glace|en boite|en conserve|haricots? rouge|haricots? blanc|pois chiche|olive|noix de coco|chocolat|bouillon|beurre de cacahuete|lait concentre|thon|sardine|mais|cornichon|capre"],
+    ['ep', "sauce tomate|pulpe de tomate|farfalle|crouton|lait de coco|creme de coco|tomates? pelee|tomates? concassee|concentre|coulis|passata|puree de tomate|sucre glace|en boite|en conserve|haricots? rouge|haricots? blanc|pois chiche|olive|noix de coco|chocolat|bouillon|beurre de cacahuete|lait concentre|thon|sardine|mais|cornichon|capre"],
     ['su', 'surgel|glace'],
-    ['ec', "sel|poivre|paprika|cumin|curry|curcuma|cannelle|muscade|piment d'espelette|herbes de provence|thym|laurier|romarin|origan|moutarde|ketchup|mayonnaise|gingembre moulu|vanille|cardamome|clou de girofle|ras el hanout|quatre epices|4 epices|sauce soja|sauce worcestershire|tabasco|harissa|sumac|zaatar|graines de"],
-    ['fl', "tomate|oignon|ail|echalote|carotte|poireau|pomme|patate|courgette|aubergine|poivron|salade|laitue|epinard|chou|brocoli|champignon|citron|orange|poire|banane|fraise|framboise|myrtille|avocat|concombre|radis|navet|celeri|fenouil|potiron|potimarron|courge|butternut|haricots? vert|petits? pois|persil|coriandre|basilic|menthe|ciboulette|aneth|gingembre|mangue|ananas|raisin|kiwi|betterave|artichaut|asperge|endive|mache|roquette|cebette|oignon nouveau|piment|panais|topinambour|blette|cresson|pamplemousse|clementine|mandarine|peche|abricot|prune|cerise|melon|pasteque|figue|grenade|citronnelle|legume|fruit|herbe"],
-    ['vp', "boeuf|veau|porc|poulet|dinde|canard|agneau|lardon|jambon|saucisse|chorizo|steak|viande|hache|escalope|saumon|cabillaud|crevette|moule|poisson|merlu|colin|lieu|truite|bacon|magret|cuisse|rumsteck|bavette|cote|roti|blanc de|filet mignon|pintade|lapin|calamar|encornet|noix de saint|saint-jacques|dorade|bar |maquereau|haddock|surimi|merguez|chipolata|pancetta|coppa|speck|rillette|pate de campagne"],
-    ['cf', "lait|beurre|creme|oeuf|fromage|yaourt|yogourt|mozzarella|parmesan|gruyere|emmental|comte|feta|chevre|ricotta|mascarpone|reblochon|raclette|faisselle|skyr|burrata|roquefort|bleu|camembert|brie|cheddar|pecorino|halloumi|saint-moret|petit suisse"],
-    ['bo', 'pain|baguette|brioche|tortilla|wrap|pita|focaccia|croissant|burger bun|bun'],
+    ['ec', "bouquet garni|piment en poudre|sel|poivre|paprika|cumin|curry|curcuma|cannelle|muscade|piment d'espelette|herbes de provence|thym|laurier|romarin|origan|moutarde|ketchup|mayonnaise|gingembre moulu|vanille|cardamome|clou de girofle|ras el hanout|quatre epices|4 epices|sauce soja|sauce worcestershire|tabasco|harissa|sumac|zaatar|graines de"],
+    ['fl', "germes de soja|tomate|oignon|ail|echalote|carotte|poireau|pomme|patate|courgette|aubergine|poivron|salade|laitue|epinard|chou|brocoli|champignon|citron|orange|poire|banane|fraise|framboise|myrtille|avocat|concombre|radis|navet|celeri|fenouil|potiron|potimarron|courge|butternut|haricots? vert|petits? pois|persil|coriandre|basilic|menthe|ciboulette|aneth|gingembre|mangue|ananas|raisin|kiwi|betterave|artichaut|asperge|endive|mache|roquette|cebette|oignon nouveau|piment|panais|topinambour|blette|cresson|pamplemousse|clementine|mandarine|peche|abricot|prune|cerise|melon|pasteque|figue|grenade|citronnelle|legume|fruit|herbe"],
+    ['vp', "saucisson|boeuf|veau|porc|poulet|dinde|canard|agneau|lardon|jambon|saucisse|chorizo|steak|viande|hache|escalope|saumon|cabillaud|crevette|moule|poisson|merlu|colin|lieu|truite|bacon|magret|cuisse|rumsteck|bavette|cote|roti|blanc de|filet mignon|pintade|lapin|calamar|encornet|noix de saint|saint-jacques|dorade|bar |maquereau|haddock|surimi|merguez|chipolata|pancetta|coppa|speck|rillette|pate de campagne"],
+    ['cf', "st moret|quenelle|lait|beurre|creme|oeuf|fromage|yaourt|yogourt|mozzarella|parmesan|gruyere|emmental|comte|feta|chevre|ricotta|mascarpone|reblochon|raclette|faisselle|skyr|burrata|roquefort|bleu|camembert|brie|cheddar|pecorino|halloumi|saint-moret|petit suisse"],
+    ['bo', 'bagel|bouchee|pain|baguette|brioche|tortilla|wrap|pita|focaccia|croissant|burger bun|bun'],
     ['ep', "pate|spaghetti|tagliatelle|penne|fusilli|lasagne|linguine|macaroni|coquillette|riz|semoule|quinoa|boulgour|lentille|farine|sucre|levure|maizena|fecule|cacao|miel|confiture|huile|vinaigre|amande|noisette|noix|pignon|raisins secs|chapelure|biscuit|flocons|sirop|nouille|vermicelle|tahini|cacahuete|pistache|graine|sesame|polenta|couscous|lentilles|chips|galette de riz|feuille de brick|cereale|compote|cafe|the |tisane|agar|gelatine|bicarbonate|sauce"],
     ['bs', 'vin|biere|jus|cidre|eau gazeuse|rhum|cognac|porto|whisky|vodka|calvados|limonade|soda|champagne|prosecco|martini|liqueur'],
   ].map(([id, kws]) => [id, new RegExp("(^|[^a-z])(" + kws + ")")]);
@@ -157,6 +157,7 @@
         if (next && /[a-z0-9]/.test(next)) continue;
         let rest = t.slice(a.length);
         if (u === 'noix' && !/^\s*(de |d')/i.test(foldSameLength(rest))) continue;
+        if (u === 'bouquet' && /^\s*garni/i.test(rest)) continue;
         return { unit: u, rest };
       }
     }
@@ -305,6 +306,14 @@
 
   // ---------- Emoji ----------
   const EMOJI_RULES = [
+    ['🍝', 'macaroni|mac and|coquillette|tortellini|cannelloni|one pot pasta|cacio'], ['🥘', 'paella|jambalaya|navarin|goulash'],
+    ['🫑', 'poivrons farcis'], ['🍅', 'tomates farcies|gaspacho|tian|soupe a la tomate|bruschetta'], ['🥒', 'courgettes farcies'], ['🍆', 'moussaka'], ['🥬', 'endive|poireau'],
+    ['🥩', 'escalope|filet mignon|kefta|brochettes de boeuf'], ['🌭', 'hot dog'], ['🐟', 'brandade|fish|lieu|morue'],
+    ['🧀', 'croziflette|flammekueche|ravioles|raclette'], ['🥧', 'pissaladiere|clafoutis aux courgettes'], ['🍳', 'tortilla espagnole'],
+    ['🍒', 'cerise'], ['🥪', 'panini|bruschetta'], ['🥐', 'roule'], ['🍚', 'bibimbap'], ['🍌', 'banana'], ['🍞', 'pain perdu'],
+    ['🍗', 'poulet roti|cordon'], ['🌭', 'saucisse|saucisson|rougail'], ['🥔', 'pommes? de terre|hachis|puree|dauphinois|parmentier'],
+    ['🥐', 'croissant|brioche'], ['🧇', 'gaufre'], ['🥟', 'empanada|nem'], ['🥯', 'bagel'], ['🥚', 'aspic'], ['🍞', 'cake'],
+    ['🧀', 'souffle'], ['🥧', 'bouchee'], ['🍝', 'gnocchi|farfalle|boulette'], ['🥕', 'crudite'], ['🍔', 'pulled pork'],
     ['🍲', 'soupe|veloute|potage|bouillon|blanquette|pot-au-feu|pot au feu|bourguignon|daube|ragout|mijote|chili|minestrone'],
     ['🥗', 'salade|taboule|bowl|poke'], ['🍝', 'pate|spaghetti|lasagne|tagliatelle|penne|carbonara|bolognaise|risotto'],
     ['🍕', 'pizza'], ['🍛', 'curry|dahl|dal|tajine|couscous|colombo|massala'], ['🍜', 'nouille|ramen|pho|wok|pad thai'],

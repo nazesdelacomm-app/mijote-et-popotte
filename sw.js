@@ -1,6 +1,6 @@
 /* Popote & Mijote — fonctionnement hors ligne */
 const CACHE = 'popote-mijote-v1';
-const FILES = ['./', './index.html', './styles.css', './app.js', './parser.js', './manifest.webmanifest',
+const FILES = ['./', './index.html', './styles.css', './app.js', './parser.js', './recettes.json', './manifest.webmanifest',
   './icon-192.png', './icon-512.png', './maskable-512.png', './apple-touch-icon.png',
   './fraunces.woff2', './figtree-400.woff2', './figtree-500.woff2', './figtree-600.woff2', './figtree-700.woff2'];
 
