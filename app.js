@@ -23,23 +23,43 @@
   function editNum(n) { if (n == null || isNaN(n)) return ''; return String(Math.round(n * 100) / 100).replace('.', ','); }
 
   // ---------- données ----------
-  function defaultDb() { return { v: 1, recipes: {}, weeks: {}, pantry: DEFAULT_PANTRY.slice(), tags: DEFAULT_TAGS.slice(), settings: { people: 2 } }; }
+  // Les mises à jour de l'appli ne touchent jamais ces données : elles vivent dans le navigateur du téléphone.
+  // Règle d'or : on ne réinitialise jamais des données existantes. On complète, on migre, on garde une copie.
+  const DB_VERSION = 2, SNAP = KEY + '-copie', BAD = KEY + '-illisible';
+  function defaultDb() { return { v: DB_VERSION, recipes: {}, weeks: {}, pantry: DEFAULT_PANTRY.slice(), tags: DEFAULT_TAGS.slice(), settings: { people: 2 } }; }
+  function parseDb(raw) { const d = JSON.parse(raw); if (d && d.recipes && typeof d.recipes === 'object') return d; throw new Error('format'); }
+  function migrate(d) {
+    const base = defaultDb();
+    const out = Object.assign(base, d, { settings: Object.assign(base.settings, d.settings || {}) });
+    out.weeks = out.weeks || {}; out.pantry = out.pantry || []; out.tags = out.tags || [];
+    out.v = DB_VERSION; return out;
+  }
+  let restoredFromCopy = false;
   function load() {
-    try {
-      const d = JSON.parse(localStorage.getItem(KEY));
-      if (d && d.recipes) {
-        const base = defaultDb();
-        return Object.assign(base, d, { settings: Object.assign(base.settings, d.settings || {}) });
-      }
-    } catch (e) { /* stockage indisponible */ }
+    let raw = null;
+    try { raw = localStorage.getItem(KEY); } catch (e) { return defaultDb(); }
+    if (raw) {
+      try { return migrate(parseDb(raw)); }
+      catch (e) { try { localStorage.setItem(BAD, raw); } catch (_) { } }
+    }
+    try { const c = JSON.parse(localStorage.getItem(SNAP) || 'null'); if (c && c.data) { restoredFromCopy = true; return migrate(parseDb(c.data)); } } catch (e) { }
     return defaultDb();
   }
   let db = load();
   let persistAsked = false;
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(db)); }
+    try {
+      const str = JSON.stringify(db);
+      const n = Object.keys(db.recipes).length;
+      // garde-fou : ne jamais écraser une base pleine par une base vide
+      if (!n) { const prev = localStorage.getItem(KEY); if (prev && prev.length > 2000) { try { if (Object.keys(parseDb(prev).recipes).length > 5) return; } catch (e) { } } }
+      localStorage.setItem(KEY, str);
+      let c = null; try { c = JSON.parse(localStorage.getItem(SNAP) || 'null'); } catch (e) { }
+      if (n && (!c || Date.now() - c.at > 3600e3)) localStorage.setItem(SNAP, JSON.stringify({ at: Date.now(), data: str }));
+    }
     catch (e) { toast("Impossible d'enregistrer sur ce téléphone"); }
     if (!persistAsked) { persistAsked = true; try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) { } }
+    if (typeof cloudSoon === 'function') cloudSoon();
   }
   const recipeList = () => Object.values(db.recipes).sort((a, b) => a.title.localeCompare(b.title, 'fr'));
   function getWeek(k, create) {
@@ -75,6 +95,7 @@
   }
 
   // ---------- état d'interface ----------
+  const A = {}; // actions (boutons)
   const ui = { week: defaultWeek(), q: '', tags: [], people: {}, draft: null, picker: null, cook: null, imp: null, nav: 0, route: '', installEvt: null };
 
   // ---------- toast ----------
@@ -122,10 +143,14 @@
   function chips(selected, act, all) {
     return '<div class="chips">' + (all || db.tags).map(t => '<button class="chip' + (selected.includes(t) ? ' on' : '') + '" data-act="' + act + '" data-v="' + esc(t) + '">' + esc(t) + '</button>').join('') + '</div>';
   }
-  function filterRecipes(q, tags) {
+  let lastHidden = 0;
+  function filterRecipes(q, tags, list) {
     const f = PM.fold(q).trim();
-    return recipeList().filter(r => (!tags.length || tags.every(t => t === FAV ? r.fav : (r.tags || []).includes(t))) &&
+    const base = (list || recipeList()).filter(r => (!tags.length || tags.every(t => t === FAV ? r.fav : (r.tags || []).includes(t))) &&
       (!f || PM.fold(r.title).includes(f) || (r.ingredients || []).some(i => PM.fold(i.name).includes(f))));
+    if (!hasExclusions()) { lastHidden = 0; return base; }
+    const kept = base.filter(r => !isExcluded(r)); lastHidden = base.length - kept.length;
+    return ui.showExcluded ? base : kept;
   }
   function metaLine(r) {
     const bits = [];
@@ -144,6 +169,83 @@
   }
   const LOGO = '<svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><path d="M24 14c0-4 4-4 4-8M33 14c0-4 4-4 4-8" fill="none" stroke="#F2785C" stroke-width="3" stroke-linecap="round"/><rect x="8" y="24" width="48" height="8" rx="4" fill="#2F2A35"/><path d="M12 32h40v12a12 12 0 0 1-12 12H24a12 12 0 0 1-12-12z" fill="#FFB89C"/><path d="M4 36h8M52 36h8" stroke="#2F2A35" stroke-width="4" stroke-linecap="round"/><circle cx="32" cy="20" r="3.5" fill="#2F2A35"/></svg>';
 
+
+  // ================= ALLERGIES & EXCLUSIONS =================
+  // [id, libellé, emoji, mots-clés, exceptions]
+  const ALLERGENS = [
+    ['gluten', 'Gluten', '🌾', 'farine|pates?|spaghetti|tagliatelle|penne|fusilli|farfalle|macaroni|coquillette|lasagne|tortellini|ravioli|cannelloni|gnocchi|linguine|rigatoni|orecchiette|crozet|casarecce|nouille|vermicelle|pain|baguette|brioche|croissant|bagel|bun|pita|tortilla|wrap|chapelure|crouton|semoule|couscous|boulgour|ble|orge|seigle|epeautre|avoine|biscuit|cereale|pane|biere|sauce soja|crepe|gaufre|feuille de brick|flocons d\'avoine', 'farine de riz|farine de mais|nouilles de riz|vermicelles de riz|galette de riz'],
+    ['crustaces', 'Crustacés', '🦐', 'crevette|gambas|langoustine|crabe|homard|ecrevisse', ''],
+    ['oeufs', 'Œufs', '🥚', 'oeuf|mayonnaise|brioche|crepe|gaufre', ''],
+    ['poisson', 'Poisson', '🐟', 'poisson|saumon|cabillaud|thon|sardine|anchois|colin|lieu|merlu|truite|dorade|bar|maquereau|haddock|morue|surimi|nuoc-mam|nuoc', ''],
+    ['arachides', 'Arachides', '🥜', 'cacahuete|arachide', ''],
+    ['soja', 'Soja', '🫘', 'soja|tofu|edamame|miso|tempeh', 'germes de soja|germe de soja'],
+    ['lait', 'Lait', '🥛', 'lait|beurre|creme|fromage|yaourt|yogourt|mozzarella|parmesan|emmental|gruyere|comte|feta|chevre|ricotta|mascarpone|reblochon|raclette|cheddar|st moret|saint moret|bechamel|brioche|croissant|pecorino|beaufort|burrata|skyr|faisselle|petit suisse|portions? de fromage', 'lait de coco|creme de coco|beurre de cacahuete|creme de marron'],
+    ['coque', 'Fruits à coque', '🌰', 'noix|noisette|amande|pistache|cajou|pecan|macadamia|praline', 'noix de muscade|noix de coco|noix de saint'],
+    ['celeri', 'Céleri', '🥬', 'celeri', ''],
+    ['moutarde', 'Moutarde', '🟡', 'moutarde', ''],
+    ['sesame', 'Sésame', '⚪', 'sesame|tahini|houmous', ''],
+    ['sulfites', 'Sulfites', '🍷', 'vin|vinaigre|raisins? secs?|cidre|porto|biere|abricots? secs?|champagne', ''],
+    ['lupin', 'Lupin', '🌼', 'lupin', ''],
+    ['mollusques', 'Mollusques', '🦪', 'moule|huitre|calamar|encornet|poulpe|seiche|saint-jacques|st jacques|escargot', ''],
+  ];
+  const DIETS = [
+    ['vege', 'Végétarien', '🥕', 'viande|boeuf|veau|porc|poulet|dinde|canard|agneau|lardon|jambon|saucisse|saucisson|chorizo|steak|hache|escalope|bacon|magret|cuisse|rumsteck|bavette|roti|filet mignon|pintade|lapin|merguez|chipolata|pancetta|coppa|speck|rillette|chair a saucisse|echine|paupiette|quenelle|charcuterie|poisson|saumon|cabillaud|thon|sardine|anchois|colin|lieu|merlu|truite|crevette|moule|calamar|surimi|nuoc|nuoc-mam|bouillon de boeuf|bouillon de volaille|sauce d\'huitre|gelatine|gelee', 'jambon de|saucisse vegetale'],
+    ['porc', 'Sans porc', '🐷', 'porc|lardon|jambon|saucisse|saucisson|chorizo|bacon|chipolata|pancetta|coppa|speck|rillette|chair a saucisse|echine|filet mignon|rosette|charcuterie|gelatine|gelee', 'jambon de dinde|jambon de poulet|saucisses? de volaille|saucisse vegetale'],
+    ['alcool', 'Sans alcool', '🚫', 'vin|biere|cidre|rhum|cognac|porto|whisky|vodka|calvados|champagne|liqueur|martini', 'vinaigre'],
+  ];
+  const mkRe = (kw, ex) => ({ re: new RegExp("(^|[^a-z])(?:" + kw + ")[sx]?(?![a-z])"), ex: ex ? new RegExp(ex) : null });
+  const RULES_A = ALLERGENS.map(([id, label, emoji, kw, ex]) => Object.assign({ id, label, emoji }, mkRe(kw, ex)));
+  const DIET_WHAT = { vege: 'Viande ou poisson', porc: 'Porc', alcool: 'Alcool' };
+  const RULES_D = DIETS.map(([id, label, emoji, kw, ex]) => Object.assign({ id, label, emoji, what: DIET_WHAT[id] }, mkRe(kw, ex)));
+  const matchRule = (rule, f) => rule.re.test(rule.ex ? f.replace(rule.ex, ' ') : f);
+  let exclVer = 0; const flagCache = new Map();
+  const exclSettings = () => ({ a: db.settings.allergens || [], d: db.settings.diets || [], v: (db.settings.avoid || []).map(PM.ingKey).filter(Boolean) });
+  const hasExclusions = () => { const s = exclSettings(); return !!(s.a.length || s.d.length || s.v.length); };
+  // motifs d'exclusion déclenchés par un ingrédient (nom seul)
+  function ingIssues(name, s) {
+    const f = PM.fold(name), k = PM.ingKey(name), out = [];
+    for (const r of RULES_A) if (s.a.includes(r.id) && matchRule(r, f)) out.push(r.label);
+    for (const r of RULES_D) if (s.d.includes(r.id) && matchRule(r, f)) out.push(r.what);
+    for (const w of s.v) if (k === w || k.includes(w) || (' ' + k + ' ').includes(' ' + w + ' ')) out.push(w);
+    return out;
+  }
+  function recipeIssues(r) {
+    if (!r) return [];
+    const key = (r.id || r.title) + '|' + (r.updated || 0) + '|' + exclVer;
+    if (flagCache.has(key)) return flagCache.get(key);
+    const s = exclSettings(); const set = new Set();
+    if (s.a.length || s.d.length || s.v.length) {
+      for (const i of r.ingredients || []) for (const x of ingIssues(i.name, s)) set.add(x);
+      const t = PM.ingKey(r.title); for (const w of s.v) if (t.includes(w)) set.add(w);
+    }
+    const out = [...set]; flagCache.set(key, out); return out;
+  }
+  const isExcluded = r => recipeIssues(r).length > 0;
+  function exclusionNote(total, hidden, act) {
+    if (!hidden) return '';
+    return '<p class="excl-note">🚫 ' + plural(hidden, 'recette masquée', 'recettes masquées') + ' (allergies & exclusions) · <button class="link" data-act="' + act + '">' + (ui.showExcluded ? 'Les masquer' : 'Les afficher') + '</button></p>';
+  }
+  function issuesBanner(r) {
+    const is = recipeIssues(r); if (!is.length) return '';
+    return '<div class="banner warn">⚠️ Contient d\'après les ingrédients : <b>' + esc(is.join(', ')) + '</b><br><small>Vérifie toujours les étiquettes des produits.</small></div>';
+  }
+  function viewExclusions() {
+    const s = exclSettings();
+    const total = Object.keys(db.recipes).length, hidden = Object.values(db.recipes).filter(isExcluded).length;
+    let h = '<header class="top"><button class="round ghost" data-act="back" data-to="plus" aria-label="Retour">‹</button><h1>Allergies & exclusions</h1></header>';
+    h += '<p class="muted small pad-x">Les recettes concernées sont masquées par défaut : liste, choix des repas, menu aléatoire, communauté. ' + (hasExclusions() ? '<b>' + hidden + ' sur ' + total + '</b> sont masquées.' : '') + '</p>';
+    h += '<div class="card"><h2>Allergies</h2><div class="chips grid">' + RULES_A.map(r => '<button class="chip' + (s.a.includes(r.id) ? ' on' : '') + '" data-act="exclToggle" data-k="allergens" data-v="' + r.id + '">' + r.emoji + ' ' + r.label + '</button>').join('') + '</div></div>';
+    h += '<div class="card"><h2>Régimes</h2><div class="chips grid">' + RULES_D.map(r => '<button class="chip' + (s.d.includes(r.id) ? ' on' : '') + '" data-act="exclToggle" data-k="diets" data-v="' + r.id + '">' + r.emoji + ' ' + r.label + '</button>').join('') + '</div></div>';
+    h += '<div class="card"><h2>Aliments que je ne mange pas</h2><p class="muted small">Ex. : coriandre, champignons, poivron…</p><div class="chips edit">' + (db.settings.avoid || []).map((t, k) => '<span class="chip on">' + esc(t) + '<button data-act="avoidDel" data-i="' + k + '" aria-label="Retirer">×</button></span>').join('') + '</div>' +
+      '<form class="add-extra" data-act-submit="avoidAdd"><input name="t" placeholder="Ajouter un aliment" autocomplete="off"><button class="btn soft" type="submit">Ajouter</button></form></div>';
+    h += '<div class="card note"><p>⚠️ <b>Une aide, pas une garantie.</b> La détection se fait à partir du <b>nom des ingrédients</b>. Elle ne connaît pas la composition des produits industriels (bouillon cube, sauces, charcuterie, plats préparés…). Vérifie toujours les étiquettes.</p><p class="muted small">Ces informations restent sur ton téléphone : elles ne sont jamais envoyées au serveur.</p></div>';
+    return h;
+  }
+  A.exclToggle = el => { const k = el.dataset.k, v = el.dataset.v; const a = db.settings[k] || []; db.settings[k] = a.includes(v) ? a.filter(x => x !== v) : a.concat(v); exclVer++; save(); rerender(); };
+  A.avoidDel = el => { db.settings.avoid.splice(+el.dataset.i, 1); exclVer++; save(); rerender(); };
+  A.toggleExcluded = () => { ui.showExcluded = !ui.showExcluded; rerender(); };
+  A.toggleExcludedPick = () => { ui.showExcluded = !ui.showExcluded; $('#pick-list').innerHTML = pickerList(); };
+
   // ================= VUES =================
   // ---------- Semaine ----------
   function viewWeek() {
@@ -154,7 +256,7 @@
     const nRec = Object.keys(db.recipes).length;
     let h = '<header class="top brandbar">' + LOGO + '<div class="brand">Popote <i>&amp;</i> Mijote</div><button class="round ghost" data-act="weekMenu" aria-label="Options">⋯</button></header>';
     if (ui.installEvt && !isStandalone() && !db.settings.hideInstall) h += '<div class="banner"><span>📲 Installe l\'app sur ton téléphone</span><button class="btn small primary" data-act="install">Installer</button><button class="x small" data-act="hideInstall" aria-label="Fermer">×</button></div>';
-    h += weekNav();
+    h += catalogBanner() + weekNav();
     if (!nRec) {
       h += emptyState('🥄', 'Ta popote est vide', 'Ajoute tes premières recettes, puis reviens ici composer ton menu de la semaine.', '<button class="btn primary" data-act="addRecipe">+ Ajouter une recette</button>');
       return h;
@@ -172,7 +274,7 @@
         h += '<div class="slot"><span class="slot-label">' + label + '</span><div class="slot-items">';
         items.forEach((it, i) => {
           const r = db.recipes[it.rid]; if (!r) return;
-          h += '<button class="pill" style="--c:' + colOf(r) + '" data-act="mealMenu" data-slot="' + sk + '" data-i="' + i + '"><span class="e">' + r.emoji + '</span><b>' + esc(r.title) + '</b><em>' + it.people + ' 👤</em></button>';
+          h += '<button class="pill" style="--c:' + colOf(r) + '" data-act="mealMenu" data-slot="' + sk + '" data-i="' + i + '"><span class="e">' + r.emoji + '</span><b>' + (isExcluded(r) ? '⚠️ ' : '') + esc(r.title) + '</b><em>' + it.people + ' 👤</em></button>';
         });
         h += '<button class="add' + (items.length ? ' mini' : '') + '" data-act="addMeal" data-slot="' + sk + '" aria-label="Ajouter un plat">' + (items.length ? '+' : '+ Choisir') + '</button></div></div>';
       }
@@ -189,16 +291,16 @@
       h += emptyState('📖', 'Aucune recette pour l\'instant', 'Saisis-en une, colle un texte, ou laisse une IA la mettre en forme pour toi.', '<button class="btn primary" data-act="addRecipe">+ Ajouter une recette</button>');
       return h;
     }
-    h += '<div class="search"><input type="search" data-in="q" placeholder="Chercher (titre, ingrédient…)" value="' + esc(ui.q) + '"></div>';
+    h += catalogBanner() + '<div class="search"><input type="search" data-in="q" placeholder="Chercher (titre, ingrédient…)" value="' + esc(ui.q) + '"></div>';
     h += chips(ui.tags, 'filterTag', filterTags());
     h += '<div id="rec-list" class="rlist">' + recipeCards() + '</div>';
     h += '<button class="fab" data-act="addRecipe">+ Ajouter</button>';
     return h;
   }
   function recipeCards() {
-    const list = filterRecipes(ui.q, ui.tags);
-    if (!list.length) return '<p class="muted center pad">Aucune recette ne correspond.</p>';
-    return list.map(r => '<a class="rcard" href="#recette-' + r.id + '" style="--c:' + colOf(r) + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + (r.fav ? '⭐ ' : '') + esc(r.title) + '</b><small>' + esc(metaLine(r) || plural((r.ingredients || []).length, 'ingrédient')) + '</small></span><span class="chev">›</span></a>').join('');
+    const list = filterRecipes(ui.q, ui.tags); const note = exclusionNote(list.length, lastHidden, 'toggleExcluded');
+    if (!list.length) return note + '<p class="muted center pad">Aucune recette ne correspond.</p>';
+    return note + list.map(r => '<a class="rcard" href="#recette-' + r.id + '" style="--c:' + colOf(r) + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + (r.fav ? '⭐ ' : '') + (isExcluded(r) ? '⚠️ ' : '') + esc(r.title) + '</b><small>' + esc(metaLine(r) || plural((r.ingredients || []).length, 'ingrédient')) + '</small></span><span class="chev">›</span></a>').join('');
   }
 
   // ---------- Détail recette ----------
@@ -206,7 +308,8 @@
     return '<ul class="ings">' + (r.ingredients || []).map((i, k) => {
       const a = i.qty != null ? PM.fmtAmount(i.qty * n, i.unit, 'recipe') : '';
       const done = mode === 'cook' && ui.cook && ui.cook.ing[k];
-      return '<li' + (mode === 'cook' ? ' data-act="cookIng" data-i="' + k + '" class="tick' + (done ? ' done' : '') + '"' : '') + '>' + (mode === 'cook' ? '<span class="box"></span>' : '') +
+      const fl = hasExclusions() && ingIssues(i.name, exclSettings()).length ? ' flag' : '';
+      return '<li' + (mode === 'cook' ? ' data-act="cookIng" data-i="' + k + '" class="tick' + (done ? ' done' : '') + fl + '"' : (fl ? ' class="' + fl.trim() + '"' : '')) + '>' + (mode === 'cook' ? '<span class="box"></span>' : '') +
         '<span class="amt">' + esc(a) + '</span><span class="iname">' + esc(i.name) + (i.note ? ' <small>' + esc(i.note) + '</small>' : '') + '</span></li>';
     }).join('') + '</ul>';
   }
@@ -216,16 +319,22 @@
       '<div class="hero-emo">' + r.emoji + '</div><h1>' + esc(r.title) + '</h1>' +
       '<div class="meta">' + (r.time ? '<span>⏱ ' + fmtTime(r.time) + '</span>' : '') + (r.tags || []).map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '</div></div>';
   }
+  function adminRecipeRow(r) {
+    if (typeof isAdmin !== 'function' || !isAdmin()) return '';
+    const pub = r.catalogUpdated, dirty = !pub || (r.updated || 0) > pub;
+    return '<div class="act-row two"><button class="btn soft" data-act="publishOne" data-id="' + r.id + '"' + (dirty ? '' : ' disabled') + '>📚 ' + (!pub ? 'Publier au catalogue' : dirty ? 'Mettre à jour le catalogue' : 'Au catalogue ✓') + '</button>' +
+      (pub ? '<button class="btn ghost" data-act="unpublishOne" data-id="' + r.id + '">Retirer du catalogue</button>' : '') + '</div>';
+  }
   function viewDetail(id) {
     const r = db.recipes[id];
     if (!r) return emptyState('🤔', 'Recette introuvable', 'Elle a peut-être été supprimée.', '<a class="btn primary" href="#recettes">Mes recettes</a>');
     const n = ui.people[id] || db.settings.people;
-    let h = hero(r, 'recettes');
+    let h = hero(r, 'recettes') + issuesBanner(r);
     h += '<div class="card"><div class="row-between"><h2>Ingrédients</h2><div class="pp">' + stepper(n, 'detPeople', 'data-id="' + id + '"') + '<small>pers.</small></div></div>' + ingList(r, n) + '</div>';
     if (r.steps && r.steps.length) h += '<div class="card"><h2>Préparation</h2><ol class="steps">' + r.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol></div>';
     if (r.notes) h += '<div class="card note"><h2>Notes</h2><p>' + esc(r.notes).replace(/\n/g, '<br>') + '</p></div>';
     h += '<div class="actions"><button class="btn primary big" data-act="cook" data-id="' + id + '">👩‍🍳 Mode cuisine</button>' +
-      '<div class="act-row"><button class="btn soft" data-act="toMenu" data-id="' + id + '">📅 Au menu</button><button class="btn soft" data-act="share" data-id="' + id + '">↗ Partager</button><a class="btn soft" href="#edition-' + id + '">✏️ Modifier</a></div></div>';
+      '<div class="act-row"><button class="btn soft" data-act="toMenu" data-id="' + id + '">📅 Au menu</button><button class="btn soft" data-act="share" data-id="' + id + '">↗ Partager</button><a class="btn soft" href="#edition-' + id + '">✏️ Modifier</a></div>' + adminRecipeRow(r) + '</div>';
     return h;
   }
 
@@ -344,13 +453,27 @@
     h += '<a href="#historique"><span class="mi">🗓</span><span class="mt"><b>Historique des menus</b><small>Revoir et réutiliser une semaine</small></span><span class="chev">›</span></a>';
     h += '<a href="#placard"><span class="mi">🏠</span><span class="mt"><b>Mon placard</b><small>' + plural(db.pantry.length, 'ingrédient') + ' toujours à la maison</small></span><span class="chev">›</span></a>';
     h += '<a href="#tags"><span class="mi">🏷</span><span class="mt"><b>Mes tags</b><small>' + db.tags.length + ' tags</small></span><span class="chev">›</span></a>';
+    const nEx = (db.settings.allergens || []).length + (db.settings.diets || []).length + (db.settings.avoid || []).length;
+    h += '<a href="#exclusions"><span class="mi">🚫</span><span class="mt"><b>Allergies & exclusions</b><small>' + (nEx ? plural(nEx, 'critère actif', 'critères actifs') : 'Aucune pour l\'instant') + '</small></span><span class="chev">›</span></a>';
     h += '<div class="mrow"><span class="mi">👥</span><span class="mt"><b>Personnes par défaut</b><small>Pour les nouveaux repas</small></span>' + stepper(db.settings.people, 'defPeople') + '</div>';
     const old = !db.settings.lastExport || (Date.now() - db.settings.lastExport > 30 * 864e5);
     h += '<a href="#sauvegarde"><span class="mi">💾</span><span class="mt"><b>Sauvegarde</b><small>' + (db.settings.lastExport ? 'Dernière : ' + new Date(db.settings.lastExport).toLocaleDateString('fr-FR') : 'Jamais faite') + '</small></span>' + (old && Object.keys(db.recipes).length ? '<span class="badge">!</span>' : '<span class="chev">›</span>') + '</a>';
     h += '<button class="mrow" data-act="loadStarter"><span class="mi">📚</span><span class="mt"><b>Recettes de départ</b><small>Ajouter les idées du livre de départ</small></span><span class="chev">›</span></button>';
     h += '<button class="mrow" data-act="shareApp"><span class="mi">💌</span><span class="mt"><b>Partager l\'app</b><small>Envoyer le lien à des amis</small></span><span class="chev">›</span></button>';
     if (ui.installEvt && !isStandalone()) h += '<button class="mrow" data-act="install"><span class="mi">📲</span><span class="mt"><b>Installer l\'app</b><small>Sur l\'écran d\'accueil</small></span><span class="chev">›</span></button>';
-    h += '</div><p class="foot">' + LOGO + '<br>Popote &amp; Mijote<br><small>Tes recettes restent sur ce téléphone.</small></p>';
+    if (ONLINE) {
+      const n = catalogNews(); const k = n.add.length + n.upd.length;
+      h += '<a href="#catalogue"><span class="mi">🆕</span><span class="mt"><b>Nouveautés du catalogue</b><small>' + (k ? plural(k, 'nouveauté', 'nouveautés') + ' à découvrir' : 'Tu es à jour') + '</small></span>' + (k ? '<span class="badge">' + k + '</span>' : '<span class="chev">›</span>') + '</a>';
+    }
+    h += '</div>';
+    if (isAdmin()) {
+      const tp = toPublish().length; const nm = ui.mod ? ui.mod.length : null; if (ui.mod === null) loadModeration();
+      h += '<h3 class="menu-title">🛡️ Admin · ' + esc(sess.admin.email) + '</h3><div class="menu">' +
+        '<a href="#moderation"><span class="mi">🛡️</span><span class="mt"><b>Modération</b><small>Recettes proposées par la communauté</small></span>' + (nm ? '<span class="badge">' + nm + '</span>' : '<span class="chev">›</span>') + '</a>' +
+        '<button class="mrow" data-act="publishAll"><span class="mi">📚</span><span class="mt"><b>Publier dans le catalogue</b><small>' + (tp ? plural(tp, 'recette', 'recettes') + ' nouvelles ou modifiées' : 'Tout est publié ✓') + '</small></span><span class="chev">›</span></button>' +
+        '<button class="mrow" data-act="adminLogout"><span class="mi">🚪</span><span class="mt"><b>Se déconnecter</b></span></button></div>';
+    }
+    h += '<div><p class="foot">' + LOGO + '<br>Popote &amp; Mijote<br><small>Tes recettes restent sur ce téléphone.</small>' + (ONLINE && !isAdmin() ? '<br><button class="link small" data-act="adminOpen">Espace admin</button>' : '') + '</p></div>';
     return h;
   }
   function viewHistory() {
@@ -374,7 +497,7 @@
   function viewBackup() {
     return '<header class="top"><button class="round ghost" data-act="back" data-to="plus" aria-label="Retour">‹</button><h1>Sauvegarde</h1></header>' +
       '<div class="card"><h2>Pourquoi ?</h2><p class="muted">Tes recettes sont stockées uniquement sur ce téléphone. Un fichier de sauvegarde te permet de les retrouver si tu changes de téléphone ou si les données du navigateur sont effacées. Garde-le dans ton Drive ou envoie-le-toi par mail.</p>' +
-      '<button class="btn primary wide" data-act="exportData">💾 Exporter mes données</button></div>' +
+      '<button class="btn primary wide" data-act="exportData">💾 Exporter mes données</button></div>' + cloudCard() +
       '<div class="card"><h2>Restaurer</h2><p class="muted">Importe un fichier de sauvegarde. Les recettes sont ajoutées à celles déjà présentes, rien n\'est effacé.</p>' +
       '<label class="btn soft wide file">📂 Importer une sauvegarde<input type="file" accept=".json,application/json" data-in="importFile" hidden></label></div>';
   }
@@ -471,6 +594,11 @@
     else if (h === 'placard') { html = listEditor('Mon placard', 'plus', db.pantry, 'pantryDel', 'pantryAdd', 'Ces ingrédients sont toujours chez toi : ils n\'apparaissent pas dans la liste de courses (mais restent visibles en bas, pour vérifier).', 'Ex. : sauce soja'); tab = 'plus'; }
     else if (h === 'tags') { html = listEditor('Mes tags', 'plus', db.tags, 'tagDel', 'tagAdd', 'Les tags servent à filtrer tes recettes et à guider le « Surprends-moi ».', 'Nouveau tag'); tab = 'plus'; }
     else if (h === 'sauvegarde') { html = viewBackup(); tab = 'plus'; }
+    else if (h === 'exclusions') { html = viewExclusions(); tab = 'plus'; }
+    else if (h === 'catalogue') { html = viewCatalog(); tab = 'recettes'; }
+    else if (h.startsWith('communaute-')) { html = viewCommunityRecipe(h.slice(11)); tab = 'communaute'; }
+    else if (h === 'communaute') { html = viewCommunity(); tab = 'communaute'; }
+    else if (h === 'moderation') { html = viewModeration(); tab = 'plus'; }
     else { location.hash = '#semaine'; return; }
     const app = $('#app');
     app.innerHTML = html;
@@ -485,7 +613,6 @@
   const rerender = () => render(true);
 
   // ================= ACTIONS =================
-  const A = {};
   A.closeSheet = () => closeSheet();
   A.back = el => { if (ui.nav > 0) history.back(); else go('#' + (el.dataset.to || 'semaine')); };
   A.weekMove = el => { ui.week = keyOf(addDays(dateOf(ui.week), 7 * +el.dataset.d)); rerender(); };
@@ -532,14 +659,14 @@
   function pickerList() {
     const p = ui.picker;
     const list = filterRecipes(p.q, p.tags);
-    let h = '';
+    let h = exclusionNote(list.length, lastHidden, 'toggleExcludedPick');
     if (p.suggest && db.recipes[p.suggest]) {
       const r = db.recipes[p.suggest];
       h += '<div class="suggest" style="--c:' + colOf(r) + '"><small>Et pourquoi pas…</small><div class="sg-emo">' + r.emoji + '</div><b>' + esc(r.title) + '</b><small>' + esc(metaLine(r)) + '</small>' +
         '<div class="btn-row"><button class="btn ghost" data-act="surprise">Une autre</button><button class="btn primary" data-act="pickRecipe" data-id="' + r.id + '">Ajouter</button></div></div>';
     }
     if (!list.length) return h + '<p class="muted center pad">Aucune recette ne correspond.</p>';
-    return h + '<div class="rlist">' + list.map(r => '<button class="rcard" style="--c:' + colOf(r) + '" data-act="pickRecipe" data-id="' + r.id + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + (r.fav ? '⭐ ' : '') + esc(r.title) + '</b><small>' + esc([metaLine(r), lastUse(r.id)].filter(Boolean).join('  ·  ')) + '</small></span><span class="plus">+</span></button>').join('') + '</div>';
+    return h + '<div class="rlist">' + list.map(r => '<button class="rcard" style="--c:' + colOf(r) + '" data-act="pickRecipe" data-id="' + r.id + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + (r.fav ? '⭐ ' : '') + (isExcluded(r) ? '⚠️ ' : '') + esc(r.title) + '</b><small>' + esc([metaLine(r), lastUse(r.id)].filter(Boolean).join('  ·  ')) + '</small></span><span class="plus">+</span></button>').join('') + '</div>';
   }
   A.addMeal = el => { ui.picker = { sk: el.dataset.slot, people: db.settings.people, q: '', tags: [], suggest: null, replace: null }; openSheet(pickerSheet); };
   A.pickPeople = el => { ui.picker.people = Math.max(1, Math.min(30, ui.picker.people + +el.dataset.d)); el.parentNode.querySelector('b').textContent = ui.picker.people; };
@@ -631,7 +758,8 @@
     const id = el.dataset.id;
     openSheet(() => '<h3 class="sheet-title">Partager la recette</h3><div class="options">' +
       '<button data-act="shareLink" data-id="' + id + '"><span>🔗</span><b>Lien Popote &amp; Mijote</b><small>Ton ami l\'ajoute à son appli en un geste</small></button>' +
-      '<button data-act="shareText" data-id="' + id + '"><span>📝</span><b>Texte de la recette</b><small>Lisible par tout le monde</small></button></div>');
+      '<button data-act="shareText" data-id="' + id + '"><span>📝</span><b>Texte de la recette</b><small>Lisible par tout le monde</small></button>' +
+      (ONLINE && !String(id).startsWith('c') ? '<button data-act="shareCommunity" data-id="' + id + '"><span>🌍</span><b>Proposer à la communauté</b><small>Visible par tous après validation</small></button>' : '') + '</div>');
   };
   A.shareLink = async el => {
     const r = db.recipes[el.dataset.id];
@@ -674,6 +802,7 @@
   A.delRecipe = () => {
     const d = ui.draft;
     confirmSheet('Supprimer « ' + d.title + ' » ?', 'Elle sera aussi retirée de tes menus.', 'Supprimer', () => {
+      const old = db.recipes[d.id]; db.settings.catalogDismissed = db.settings.catalogDismissed || {}; db.settings.catalogDismissed[d.id] = Math.max(old.updated || 0, old.catalogUpdated || 0, Date.now());
       delete db.recipes[d.id];
       for (const w of Object.values(db.weeks)) for (const k of Object.keys(w.slots || {})) { w.slots[k] = w.slots[k].filter(it => it.rid !== d.id); if (!w.slots[k].length) delete w.slots[k]; }
       save(); ui.draft = null; toast('Recette supprimée'); location.replace('#recettes');
@@ -746,7 +875,7 @@
     const recs = ids.map(id => db.recipes[id]).filter(Boolean);
     const pastaCount = recs.filter(isPasta).length;
     const types = {}; for (const r of recs) types[rType(r)] = (types[rType(r)] || 0) + 1;
-    let pool = recipeList().filter(r => !(r.tags || []).some(t => t === 'Dessert' || t === 'Apéro') && !(exclude && exclude.has(r.id)) && (r.ingredients || []).length);
+    let pool = recipeList().filter(r => !isExcluded(r) && !(r.tags || []).some(t => t === 'Dessert' || t === 'Apéro') && !(exclude && exclude.has(r.id)) && (r.ingredients || []).length);
     if (opts.kids) { const k = pool.filter(r => (r.tags || []).includes('Enfants')); if (k.length) pool = k; }
     const quickOk = r => !weekday || !opts.quick || isQuick(r);
     const rules = [
@@ -876,9 +1005,352 @@
   };
   A.stopTimer = el => { const i = timers.findIndex(t => t.id === el.dataset.id); if (i > -1) timers.splice(i, 1); drawTimers(); };
 
+
+  // ================= SERVEUR (Firebase, appelé en direct, sans bibliothèque) =================
+  const CFG = window.PM_CONFIG || {};
+  const ONLINE = !!(CFG.apiKey && CFG.projectId);
+  const FS = 'https://firestore.googleapis.com/v1/projects/' + CFG.projectId + '/databases/(default)/documents';
+  const SKEY = 'popote-mijote-session';
+  let sess = (() => { try { return JSON.parse(localStorage.getItem(SKEY)) || {}; } catch (e) { return {}; } })();
+  const saveSess = () => { try { localStorage.setItem(SKEY, JSON.stringify(sess)); } catch (e) { } };
+  const isAdmin = () => !!(ONLINE && sess.admin && sess.admin.refreshToken);
+  async function authPost(url, body, form) {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': form ? 'application/x-www-form-urlencoded' : 'application/json' }, body: form ? body : JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((j.error && j.error.message) || 'connexion');
+    return j;
+  }
+  async function idToken(kind) {
+    const s = sess[kind];
+    if (s && s.idToken && s.exp > Date.now() + 60000) return s.idToken;
+    if (s && s.refreshToken) {
+      const j = await authPost('https://securetoken.googleapis.com/v1/token?key=' + CFG.apiKey, 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(s.refreshToken), true);
+      s.idToken = j.id_token; s.refreshToken = j.refresh_token; s.exp = Date.now() + (+j.expires_in) * 1000; saveSess(); return s.idToken;
+    }
+    if (kind === 'anon') {
+      const j = await authPost('https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=' + CFG.apiKey, { returnSecureToken: true });
+      sess.anon = { idToken: j.idToken, refreshToken: j.refreshToken, uid: j.localId, exp: Date.now() + (+j.expiresIn) * 1000 }; saveSess(); return j.idToken;
+    }
+    throw new Error('connexion admin requise');
+  }
+  async function adminLogin(email, password) {
+    const j = await authPost('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + CFG.apiKey, { email, password, returnSecureToken: true });
+    sess.admin = { email, idToken: j.idToken, refreshToken: j.refreshToken, uid: j.localId, exp: Date.now() + (+j.expiresIn) * 1000 }; saveSess();
+  }
+  const fv = v => typeof v === 'number' ? (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v }) : typeof v === 'boolean' ? { booleanValue: v } : { stringValue: String(v == null ? '' : v) };
+  const toFields = o => { const f = {}; for (const k in o) f[k] = fv(o[k]); return f; };
+  const fromDoc = d => { const o = { _id: d.name.split('/').pop() }; for (const [k, v] of Object.entries(d.fields || {})) o[k] = 'stringValue' in v ? v.stringValue : 'integerValue' in v ? +v.integerValue : 'doubleValue' in v ? v.doubleValue : 'booleanValue' in v ? v.booleanValue : null; return o; };
+  async function fsReq(method, path, body, auth) {
+    const h = { 'Content-Type': 'application/json' };
+    if (auth) h.Authorization = 'Bearer ' + await idToken(auth);
+    const r = await fetch(FS + path + (path.includes('?') ? '&' : '?') + 'key=' + CFG.apiKey, { method, headers: h, body: body ? JSON.stringify(body) : undefined });
+    if (r.status === 404) return null;
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(r.status === 403 ? 'accès refusé' : (j.error && j.error.message) || ('erreur ' + r.status));
+    return j;
+  }
+  async function listAll(coll) {
+    let out = [], tok = '';
+    do { const j = await fsReq('GET', '/' + coll + '?pageSize=300' + (tok ? '&pageToken=' + encodeURIComponent(tok) : '')); if (!j) break; out = out.concat((j.documents || []).map(fromDoc)); tok = j.nextPageToken; } while (tok);
+    return out;
+  }
+  async function queryStatus(coll, status, auth) {
+    const j = await fsReq('POST', ':runQuery', { structuredQuery: { from: [{ collectionId: coll }], where: { fieldFilter: { field: { fieldPath: 'status' }, op: 'EQUAL', value: { stringValue: status } } } } }, auth);
+    return (j || []).filter(x => x.document).map(x => fromDoc(x.document));
+  }
+  const packRecipe = r => { const o = clone(r); delete o.fav; delete o.catalogUpdated; return JSON.stringify(o); };
+  function unpackRecipe(str) {
+    const r = typeof str === 'string' ? JSON.parse(str) : str;
+    return {
+      id: String(r.id || uid()), title: String(r.title || 'Recette').slice(0, 120), emoji: String(r.emoji || '🍽️').slice(0, 8), color: COLORS[r.color] ? r.color : COLOR_KEYS[hashIdx(r.title || '', COLOR_KEYS.length)],
+      servings: Math.max(1, +r.servings || 4), time: +r.time || null, tags: (r.tags || []).map(String).filter(t => db.tags.includes(t)).slice(0, 8),
+      ingredients: (r.ingredients || []).slice(0, 80).map(i => ({ qty: i.qty == null || isNaN(+i.qty) ? null : +i.qty, unit: PM.UNITS.includes(i.unit) ? i.unit : '', name: String(i.name || '').slice(0, 80), note: String(i.note || '').slice(0, 80), cat: PM.CATEGORIES.some(c => c.id === i.cat) ? i.cat : PM.categorize(String(i.name || '')) })).filter(i => i.name),
+      steps: (r.steps || []).map(s => String(s).slice(0, 1500)).slice(0, 40), notes: String(r.notes || '').slice(0, 2000), created: +r.created || Date.now(), updated: +r.updated || Date.now(),
+    };
+  }
+  window.addEventListener('online', () => { checkCatalog(); cloudSoon(); });
+
+  // ---------- catalogue officiel ----------
+  const CKEY = 'popote-mijote-catalogue';
+  let catalog = (() => { try { return JSON.parse(localStorage.getItem(CKEY)) || null; } catch (e) { return null; } })();
+  async function checkCatalog(force) {
+    if (!ONLINE || (!navigator.onLine && !force)) return;
+    if (!force && Date.now() - (db.settings.catalogChecked || 0) < 3 * 3600e3) return;
+    try {
+      const meta = await fsReq('GET', '/meta/catalog');
+      db.settings.catalogChecked = Date.now();
+      if (meta) {
+        const v = fromDoc(meta).version || 0;
+        if (!catalog || catalog.version !== v || force) {
+          const docs = await listAll('catalog');
+          catalog = { version: v, items: docs.map(d => ({ id: d._id, updated: d.updated || 0, title: d.title || '', data: d.data })) };
+          try { localStorage.setItem(CKEY, JSON.stringify(catalog)); } catch (e) { }
+        }
+      }
+      save(); if (['semaine', 'recettes', 'catalogue', 'plus'].includes(ui.route)) render(true);
+      if (force) toast('Catalogue vérifié ✓');
+    } catch (e) { if (force) toast('Catalogue injoignable (' + e.message + ')'); }
+  }
+  function catalogNews() {
+    const res = { add: [], upd: [] }; if (!catalog) return res;
+    const dis = db.settings.catalogDismissed || {};
+    for (const it of catalog.items) {
+      if (dis[it.id] && dis[it.id] >= it.updated) continue;
+      const loc = db.recipes[it.id];
+      if (!loc) res.add.push(it);
+      else { const base = loc.catalogUpdated || loc.created || loc.updated || 0; if (it.updated > base) res.upd.push(Object.assign({ modified: (loc.updated || 0) > base }, it)); }
+    }
+    return res;
+  }
+  function catalogBanner() {
+    if (!ONLINE || ui.hideNews) return '';
+    const n = catalogNews(); if (!n.add.length && !n.upd.length) return '';
+    const bits = []; if (n.add.length) bits.push(plural(n.add.length, 'nouvelle recette', 'nouvelles recettes')); if (n.upd.length) bits.push(plural(n.upd.length, 'mise à jour', 'mises à jour'));
+    return '<a class="banner news" href="#catalogue"><span>📚 Catalogue : ' + bits.join(' · ') + '</span><b>Voir ›</b></a>';
+  }
+  function viewCatalog() {
+    let h = '<header class="top"><button class="round ghost" data-act="back" data-to="recettes" aria-label="Retour">‹</button><h1>Nouveautés</h1><button class="round ghost" data-act="catRefresh" aria-label="Vérifier">↻</button></header>';
+    if (!ONLINE) return h + serverOff();
+    const n = catalogNews(); ui.catSel = ui.catSel || {};
+    if (!n.add.length && !n.upd.length) return h + emptyState('✅', 'Tu es à jour', 'Aucune nouvelle recette dans le catalogue pour le moment.', '<button class="btn soft" data-act="catRefresh">Vérifier maintenant</button>');
+    const row = (it, upd) => {
+      if (!(it.id in ui.catSel)) ui.catSel[it.id] = !(upd && it.modified);
+      let r; try { r = unpackRecipe(it.data); } catch (e) { return ''; }
+      const is = recipeIssues(Object.assign({}, r, { id: 'cat-' + r.id }));
+      return '<div class="item' + (ui.catSel[it.id] ? '' : ' off') + '" data-act="catSel" data-id="' + esc(it.id) + '"><span class="box sel"></span><span class="iname"><b>' + r.emoji + ' ' + esc(r.title) + '</b><small>' +
+        esc([metaLine(r), upd && it.modified ? '✏️ remplacera ta version modifiée' : '', is.length ? '⚠️ ' + is.join(', ') : ''].filter(Boolean).join('  ·  ')) + '</small></span></div>';
+    };
+    h += '<p class="muted small pad-x">Coche ce que tu veux ajouter. Tes recettes et tes favoris sont conservés.</p>';
+    if (n.add.length) h += '<section class="group"><h3>✨ Nouvelles recettes (' + n.add.length + ')</h3>' + n.add.map(it => row(it, false)).join('') + '</section>';
+    if (n.upd.length) h += '<section class="group"><h3>🔄 Mises à jour (' + n.upd.length + ')</h3>' + n.upd.map(it => row(it, true)).join('') + '</section>';
+    const k = [...n.add, ...n.upd].filter(it => ui.catSel[it.id]).length;
+    h += '<div class="share-bar"><button class="btn primary" data-act="catApply"' + (k ? '' : ' disabled') + '>Ajouter la sélection (' + k + ')</button><button class="btn ghost" data-act="catIgnore">Ignorer le reste</button></div>';
+    return h;
+  }
+  A.catRefresh = () => { toast('Vérification…'); checkCatalog(true); };
+  A.catSel = el => { const id = el.dataset.id; ui.catSel[id] = !ui.catSel[id]; rerender(); };
+  A.catApply = () => {
+    const n = catalogNews(); let k = 0;
+    for (const it of [...n.add, ...n.upd]) {
+      if (!ui.catSel[it.id]) continue;
+      try { const loc = db.recipes[it.id]; const r = unpackRecipe(it.data); r.id = it.id; r.updated = it.updated; r.catalogUpdated = it.updated; r.created = loc ? loc.created || it.updated : it.updated; if (loc && loc.fav) r.fav = true; db.recipes[it.id] = r; k++; } catch (e) { }
+    }
+    ui.catSel = {}; exclVer++; save(); toast('📚 ' + plural(k, 'recette importée', 'recettes importées') + ' ✓'); go('#recettes');
+  };
+  A.catIgnore = () => {
+    const n = catalogNews(); db.settings.catalogDismissed = db.settings.catalogDismissed || {};
+    for (const it of [...n.add, ...n.upd]) if (!ui.catSel[it.id]) db.settings.catalogDismissed[it.id] = it.updated;
+    save(); rerender(); toast('C\'est noté');
+  };
+
+  // ---------- admin : publier dans le catalogue ----------
+  const toPublish = () => Object.values(db.recipes).filter(r => !r.catalogUpdated || (r.updated || 0) > r.catalogUpdated);
+  async function publishRecipes(list) {
+    const queue = list.slice(); let done = 0;
+    const worker = async () => {
+      while (queue.length) {
+        const r = queue.shift(); r.updated = r.updated || r.created || Date.now();
+        await fsReq('PATCH', '/catalog/' + encodeURIComponent(r.id), { fields: toFields({ data: packRecipe(r), updated: r.updated, title: r.title }) }, 'admin');
+        r.catalogUpdated = r.updated; done++;
+        if (done % 10 === 0) { const t = $('#toast'); if (t) { t.textContent = '📤 ' + done + ' / ' + list.length; t.classList.add('show'); } }
+      }
+    };
+    try { await Promise.all([1, 2, 3, 4, 5].map(worker)); }
+    finally { if (done) await fsReq('PATCH', '/meta/catalog', { fields: toFields({ version: Date.now(), count: Object.values(db.recipes).filter(r => r.catalogUpdated).length }) }, 'admin'); save(); }
+    return done;
+  }
+  A.publishOne = async el => {
+    const r = db.recipes[el.dataset.id];
+    try { await publishRecipes([r]); toast('📚 Publiée dans le catalogue'); rerender(); } catch (e) { toast('Publication impossible (' + e.message + ')'); }
+  };
+  A.unpublishOne = el => {
+    const r = db.recipes[el.dataset.id];
+    confirmSheet('Retirer « ' + r.title + ' » du catalogue ?', 'Les personnes qui l\'ont déjà gardent leur copie.', 'Retirer', async () => {
+      try { await fsReq('DELETE', '/catalog/' + encodeURIComponent(r.id), null, 'admin'); await fsReq('PATCH', '/meta/catalog', { fields: toFields({ version: Date.now() }) }, 'admin'); delete r.catalogUpdated; save(); rerender(); toast('Retirée du catalogue'); }
+      catch (e) { toast('Impossible (' + e.message + ')'); }
+    }, true);
+  };
+  A.publishAll = () => {
+    const list = toPublish(); if (!list.length) { toast('Tout est déjà publié ✓'); return; }
+    confirmSheet('Publier ' + plural(list.length, 'recette', 'recettes') + ' ?', 'Les nouvelles recettes et tes modifications seront proposées à tous les utilisateurs.', 'Publier', async () => {
+      toast('📤 Publication en cours…');
+      try { const n = await publishRecipes(list); toast('📚 ' + plural(n, 'recette publiée', 'recettes publiées') + ' ✓'); rerender(); } catch (e) { toast('Publication interrompue (' + e.message + ')'); rerender(); }
+    });
+  };
+  A.adminOpen = () => openSheet(() => '<h3 class="sheet-title">🔐 Espace admin</h3><p class="muted small">Réservé au créateur de l\'appli, pour publier le catalogue et valider les recettes de la communauté.</p>' +
+    '<form class="stack" data-act-submit="adminLogin"><input name="email" type="email" placeholder="E-mail" autocomplete="username" required><input name="t" type="password" placeholder="Mot de passe" autocomplete="current-password" required><button class="btn primary wide" type="submit">Se connecter</button></form>');
+  A.adminLogout = () => { delete sess.admin; saveSess(); rerender(); toast('Déconnecté'); };
+
+  // ---------- communauté ----------
+  ui.comm = { list: null, at: 0, q: '', tags: [] };
+  async function loadCommunity(force) {
+    if (!ONLINE || ui.comm.loading) return;
+    if (!force && ui.comm.list && Date.now() - ui.comm.at < 600e3) return;
+    ui.comm.loading = true; ui.comm.err = null; if (ui.route.startsWith('communaute')) render(true);
+    try {
+      const docs = await queryStatus('community', 'approved');
+      ui.comm.list = docs.map(d => { try { const r = unpackRecipe(d.data); r.id = 'c' + d._id; return { docId: d._id, author: (d.author || '').slice(0, 30), created: d.created || 0, recipe: r }; } catch (e) { return null; } }).filter(Boolean).sort((a, b) => b.created - a.created);
+      ui.comm.at = Date.now();
+    } catch (e) { ui.comm.err = e.message; }
+    ui.comm.loading = false; if (ui.route.startsWith('communaute')) render(true);
+  }
+  function serverOff() { return emptyState('🌍', 'Bientôt disponible', 'Cette partie s\'active dès que le serveur de l\'appli est branché.', ''); }
+  function viewCommunity() {
+    let h = '<header class="top"><h1>Communauté</h1><button class="round ghost" data-act="commRefresh" aria-label="Actualiser">↻</button></header>';
+    if (!ONLINE) return h + serverOff();
+    loadCommunity();
+    h += '<button class="btn soft wide" data-act="commPropose">＋ Proposer une de mes recettes</button><div style="height:12px"></div>';
+    const c = ui.comm;
+    if (!c.list) return h + (c.err ? emptyState('📡', 'Pas de connexion', 'Impossible de joindre la communauté (' + esc(c.err) + ').', '<button class="btn primary" data-act="commRefresh">Réessayer</button>') : '<p class="muted center pad">Chargement des recettes…</p>');
+    if (!c.list.length) return h + emptyState('🌱', 'Pas encore de recette partagée', 'Sois le premier à proposer une recette !', '');
+    h += '<div class="search"><input type="search" data-in="commQ" placeholder="Chercher dans la communauté" value="' + esc(c.q) + '"></div>' + '<div id="comm-tags">' + chips(c.tags, 'commTag') + '</div><div id="comm-list" class="rlist">' + commCards() + '</div>';
+    return h;
+  }
+  function commCards() {
+    const c = ui.comm; const byId = {}; for (const x of c.list) byId[x.recipe.id] = x;
+    const list = filterRecipes(c.q, c.tags, c.list.map(x => x.recipe)); const note = exclusionNote(list.length, lastHidden, 'toggleExcluded');
+    if (!list.length) return note + '<p class="muted center pad">Aucune recette ne correspond.</p>';
+    return note + list.map(r => { const x = byId[r.id]; const mine = !!db.recipes[r.id];
+      return '<a class="rcard" href="#communaute-' + x.docId + '" style="--c:' + colOf(r) + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + (isExcluded(r) ? '⚠️ ' : '') + esc(r.title) + '</b><small>' + esc([x.author ? 'par ' + x.author : '', metaLine(r)].filter(Boolean).join('  ·  ')) + '</small></span>' + (mine ? '<span class="have">✓</span>' : '<span class="chev">›</span>') + '</a>'; }).join('');
+  }
+  function viewCommunityRecipe(docId) {
+    if (!ui.comm.list) { loadCommunity(); return '<p class="muted center pad">Chargement…</p>'; }
+    const x = ui.comm.list.find(y => y.docId === docId);
+    if (!x) return emptyState('🤔', 'Recette introuvable', 'Elle a peut-être été retirée.', '<a class="btn primary" href="#communaute">Communauté</a>');
+    const r = x.recipe; const mine = !!db.recipes[r.id];
+    let h = hero(r, 'communaute') + issuesBanner(r);
+    h += '<div class="actions">' + (mine ? '<a class="btn soft big" href="#recette-' + r.id + '">✓ Dans tes recettes · ouvrir</a>' : '<button class="btn primary big" data-act="commAdd" data-id="' + x.docId + '">+ Ajouter à mes recettes</button>') + '</div>';
+    if (x.author) h += '<p class="muted small center">Proposée par <b>' + esc(x.author) + '</b></p>';
+    h += '<div class="card"><h2>Ingrédients <small class="muted">pour ' + plural(r.servings, 'personne') + '</small></h2>' + ingList(r, r.servings) + '</div>';
+    if (r.steps.length) h += '<div class="card"><h2>Préparation</h2><ol class="steps">' + r.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol></div>';
+    if (r.notes) h += '<div class="card note"><h2>Notes</h2><p>' + esc(r.notes) + '</p></div>';
+    if (isAdmin()) h += '<button class="btn danger-ghost wide" data-act="commRemove" data-id="' + x.docId + '">🛡️ Retirer de la communauté</button>';
+    return h;
+  }
+  A.commRefresh = () => loadCommunity(true);
+  A.commTag = el => { const t = el.dataset.v, a = ui.comm.tags; ui.comm.tags = a.includes(t) ? a.filter(x => x !== t) : a.concat(t); rerender(); };
+  A.commAdd = el => {
+    const x = ui.comm.list.find(y => y.docId === el.dataset.id); if (!x) return;
+    const r = clone(x.recipe); r.created = Date.now(); r.updated = r.created; db.recipes[r.id] = r; save(); toast('Recette ajoutée 🎉'); go('#recette-' + r.id);
+  };
+  A.commRemove = el => confirmSheet('Retirer cette recette de la communauté ?', 'Elle ne sera plus visible. Ceux qui l\'ont ajoutée la gardent.', 'Retirer', async () => {
+    try { await fsReq('DELETE', '/community/' + el.dataset.id, null, 'admin'); ui.comm.list = ui.comm.list.filter(y => y.docId !== el.dataset.id); toast('Retirée'); go('#communaute'); } catch (e) { toast('Impossible (' + e.message + ')'); }
+  }, true);
+  A.commPropose = () => { ui.prop = { q: '' }; openSheet(proposeSheet); };
+  function proposeSheet() {
+    const list = filterRecipes(ui.prop.q, [], recipeList().filter(r => !String(r.id).startsWith('c'))).slice(0, 80);
+    return '<div class="sheet-head"><h3>Quelle recette partager ?</h3><button class="round ghost" data-act="closeSheet" aria-label="Fermer">×</button></div>' +
+      '<div class="search"><input type="search" data-in="propQ" placeholder="Chercher une de mes recettes" value="' + esc(ui.prop.q) + '"></div><div id="prop-list" class="rlist">' + propList(list) + '</div>';
+  }
+  const propList = list => list.map(r => '<button class="rcard" style="--c:' + colOf(r) + '" data-act="commPick" data-id="' + r.id + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + esc(r.title) + '</b><small>' + ((db.settings.proposed || {})[r.id] ? 'Déjà proposée' : esc(metaLine(r))) + '</small></span><span class="plus">›</span></button>').join('') || '<p class="muted center pad">Aucune recette.</p>';
+  A.commPick = el => { ui.prop.id = el.dataset.id; sheetFn = proposeConfirm; drawSheet(); };
+  A.shareCommunity = el => { ui.prop = { id: el.dataset.id, q: '' }; sheetFn = proposeConfirm; drawSheet(); };
+  function proposeConfirm() {
+    const r = db.recipes[ui.prop.id];
+    return '<h3 class="sheet-title">' + r.emoji + ' Partager « ' + esc(r.title) + ' »</h3><p class="muted small">Elle sera visible par tous après validation. Tu peux signer avec un pseudo (facultatif).</p>' +
+      '<form class="stack" data-act-submit="commSend"><input name="t" placeholder="Ton pseudo (facultatif)" maxlength="30" value="' + esc(db.settings.pseudo || '') + '"><button class="btn primary wide" type="submit">🌍 Envoyer à la communauté</button></form>';
+  }
+  async function commSend(pseudo) {
+    const r = db.recipes[ui.prop.id];
+    db.settings.pseudo = pseudo; save();
+    try {
+      await fsReq('POST', '/community', { fields: toFields({ status: 'pending', data: packRecipe(r), title: r.title.slice(0, 120), author: pseudo.slice(0, 30), created: Date.now() }) }, 'anon');
+      db.settings.proposed = db.settings.proposed || {}; db.settings.proposed[r.id] = Date.now(); save();
+      closeSheet(() => toast('Merci ! Elle sera visible après validation 🙌'));
+    } catch (e) { toast('Envoi impossible (' + e.message + ')'); }
+  }
+
+  // ---------- admin : modération ----------
+  ui.mod = null;
+  async function loadModeration() {
+    if (ui.modLoading) return; ui.modLoading = true; ui.modAt = Date.now();
+    try { ui.mod = (await queryStatus('community', 'pending', 'admin')).map(d => { try { const r = unpackRecipe(d.data); return { docId: d._id, author: d.author || '', created: d.created || 0, recipe: r }; } catch (e) { return null; } }).filter(Boolean).sort((a, b) => a.created - b.created); ui.modErr = null; }
+    catch (e) { ui.modErr = e.message; ui.mod = ui.mod || []; }
+    ui.modLoading = false; ui.modAt = Date.now();
+    if (['moderation', 'plus'].includes(ui.route)) render(true);
+  }
+  function viewModeration() {
+    let h = '<header class="top"><button class="round ghost" data-act="back" data-to="plus" aria-label="Retour">‹</button><h1>Modération</h1><button class="round ghost" data-act="modRefresh" aria-label="Actualiser">↻</button></header>';
+    if (!isAdmin()) return h + emptyState('🔐', 'Réservé à l\'admin', '', '');
+    if (!ui.mod || Date.now() - (ui.modAt || 0) > 5000) loadModeration();
+    if (!ui.mod) return h + '<p class="muted center pad">Chargement…</p>';
+    if (ui.modErr) h += '<div class="banner warn">' + esc(ui.modErr) + '</div>';
+    if (!ui.mod.length) return h + emptyState('✅', 'Rien à valider', 'Aucune recette en attente.', '');
+    for (const x of ui.mod) {
+      const r = x.recipe;
+      h += '<div class="card mod"><div class="mod-head"><span class="emo" style="--c:' + colOf(r) + '">' + r.emoji + '</span><div><b>' + esc(r.title) + '</b><small>' + esc([x.author ? 'par ' + x.author : 'anonyme', new Date(x.created).toLocaleDateString('fr-FR'), metaLine(r)].filter(Boolean).join(' · ')) + '</small></div></div>' +
+        '<details><summary>Voir la recette</summary><p class="muted small">Pour ' + plural(r.servings, 'personne') + '</p>' + ingList(r, r.servings) + '<ol class="steps">' + r.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol></details>' +
+        '<div class="btn-row"><button class="btn ghost" data-act="modReject" data-id="' + x.docId + '">Refuser</button><button class="btn primary" data-act="modApprove" data-id="' + x.docId + '">Publier</button></div></div>';
+    }
+    return h;
+  }
+  A.modRefresh = () => { ui.mod = null; rerender(); };
+  A.modApprove = async el => {
+    try { await fsReq('PATCH', '/community/' + el.dataset.id + '?updateMask.fieldPaths=status', { fields: toFields({ status: 'approved' }) }, 'admin'); ui.mod = ui.mod.filter(x => x.docId !== el.dataset.id); ui.comm.at = 0; rerender(); toast('✅ Publiée dans la communauté'); }
+    catch (e) { toast('Impossible (' + e.message + ')'); }
+  };
+  A.modReject = el => confirmSheet('Refuser cette recette ?', 'Elle sera supprimée définitivement.', 'Refuser', async () => {
+    try { await fsReq('DELETE', '/community/' + el.dataset.id, null, 'admin'); ui.mod = ui.mod.filter(x => x.docId !== el.dataset.id); rerender(); toast('Refusée'); } catch (e) { toast('Impossible (' + e.message + ')'); }
+  }, true);
+
+  // ---------- sauvegarde en ligne par code ----------
+  const CODE_ALPH = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  function newCode() { const a = new Uint8Array(16); crypto.getRandomValues(a); let s = ''; for (const x of a) s += CODE_ALPH[x % CODE_ALPH.length]; return s.match(/.{4}/g).join('-'); }
+  const codeId = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  async function packText(str) {
+    const bytes = new TextEncoder().encode(str);
+    if (window.CompressionStream) { try { const st = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw')); return 'z' + b64u(new Uint8Array(await new Response(st).arrayBuffer())); } catch (e) { } }
+    return 'j' + b64u(bytes);
+  }
+  async function unpackText(s) {
+    let bytes = unb64u(s.slice(1));
+    if (s[0] === 'z') { const st = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')); bytes = new Uint8Array(await new Response(st).arrayBuffer()); }
+    return new TextDecoder().decode(bytes);
+  }
+  let cloudT = null, skipCloud = false;
+  function cloudSoon() { if (skipCloud || !ONLINE || !db.settings.cloudCode) return; clearTimeout(cloudT); cloudT = setTimeout(() => { cloudT = null; cloudBackup(true); }, 20000); }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && cloudT) { clearTimeout(cloudT); cloudT = null; cloudBackup(true); } });
+  async function cloudBackup(silent) {
+    if (!ONLINE || !db.settings.cloudCode) return;
+    try {
+      const copy = clone(db); delete copy.settings.allergens; delete copy.settings.diets; delete copy.settings.avoid; // la santé reste sur le téléphone
+      const data = await packText(JSON.stringify(copy));
+      await fsReq('PATCH', '/backups/' + codeId(db.settings.cloudCode), { fields: toFields({ data, at: Date.now() }) }, 'anon');
+      db.settings.cloudAt = Date.now(); skipCloud = true; save(); skipCloud = false;
+      if (!silent) { toast('☁️ Sauvegardé en ligne'); rerender(); }
+    } catch (e) { if (!silent) toast('Sauvegarde en ligne impossible (' + e.message + ')'); }
+  }
+  function cloudCard() {
+    if (!ONLINE) return '';
+    const c = db.settings.cloudCode;
+    if (!c) return '<div class="card"><h2>☁️ Sauvegarde en ligne</h2><p class="muted">Tes recettes sont copiées automatiquement en ligne. Avec ton <b>code personnel</b>, tu les retrouves sur un autre téléphone, même si celui-ci est perdu ou réinitialisé.</p>' +
+      '<button class="btn primary wide" data-act="cloudOn">Activer la sauvegarde en ligne</button><div style="height:8px"></div><button class="btn soft wide" data-act="cloudRestoreOpen">J\'ai déjà un code : récupérer mes recettes</button></div>';
+    return '<div class="card"><h2>☁️ Sauvegarde en ligne</h2><p class="muted small">Activée · ' + (db.settings.cloudAt ? 'dernière : ' + new Date(db.settings.cloudAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : 'pas encore faite') + '</p>' +
+      '<p class="muted small">Ton code de récupération (garde-le précieusement, envoie-le-toi par mail par exemple) :</p><div class="code-box">' + esc(c) + '</div>' +
+      '<div class="btn-row"><button class="btn soft" data-act="cloudCopy">Copier le code</button><button class="btn primary" data-act="cloudNow">Sauvegarder</button></div><div style="height:8px"></div><button class="btn ghost wide" data-act="cloudRestoreOpen">Récupérer depuis un autre code</button></div>';
+  }
+  A.cloudOn = async () => { db.settings.cloudCode = newCode(); save(); rerender(); await cloudBackup(false); };
+  A.cloudNow = () => cloudBackup(false);
+  A.cloudCopy = () => shareOrCopy({ title: 'Mon code Popote & Mijote', text: 'Mon code de sauvegarde Popote & Mijote : ' + db.settings.cloudCode }, 'Code copié ✓');
+  A.cloudRestoreOpen = () => openSheet(() => '<h3 class="sheet-title">Récupérer mes recettes</h3><p class="muted small">Entre ton code de sauvegarde. Les recettes récupérées s\'ajoutent à celles du téléphone, rien n\'est effacé.</p>' +
+    '<form class="stack" data-act-submit="cloudRestore"><input name="t" placeholder="XXXX-XXXX-XXXX-XXXX" autocapitalize="characters" autocomplete="off" required><button class="btn primary wide" type="submit">Récupérer</button></form>');
+  async function cloudRestore(code) {
+    try {
+      const doc = await fsReq('GET', '/backups/' + codeId(code), null, 'anon');
+      if (!doc) { toast('Code introuvable'); return; }
+      const d = JSON.parse(await unpackText(fromDoc(doc).data));
+      const n = mergeData(d);
+      for (const k of ['pseudo', 'people']) if (d.settings && d.settings[k] != null && db.settings[k] == null) db.settings[k] = d.settings[k];
+      db.settings.cloudCode = codeId(code).match(/.{1,4}/g).join('-'); save();
+      closeSheet(() => { toast('☁️ ' + plural(n, 'recette récupérée', 'recettes récupérées') + ' ✓'); rerender(); });
+    } catch (e) { toast('Récupération impossible (' + e.message + ')'); }
+  }
+
   // ================= SAISIES =================
   const I = {};
   I.q = el => { ui.q = el.value; $('#rec-list').innerHTML = recipeCards(); };
+  I.commQ = el => { ui.comm.q = el.value; $('#comm-list').innerHTML = commCards(); };
+  I.propQ = el => { ui.prop.q = el.value; $('#prop-list').innerHTML = propList(filterRecipes(ui.prop.q, [], recipeList().filter(r => !String(r.id).startsWith('c'))).slice(0, 80)); };
   I.pickQ = el => { ui.picker.q = el.value; ui.picker.suggest = null; $('#pick-list').innerHTML = pickerList(); };
   I.dTitle = el => { ui.draft.title = el.value; if (!ui.draft.emojiManual) { ui.draft.emoji = PM.guessEmoji(el.value); const b = $('.emo-btn'); if (b) b.textContent = ui.draft.emoji; } };
   I.dTime = el => { ui.draft.time = el.value.replace(/\D/g, ''); };
@@ -929,10 +1401,19 @@
   document.addEventListener('submit', e => {
     const f = e.target.closest('form[data-act-submit]'); if (!f) return;
     e.preventDefault();
-    const v = (f.elements.t.value || '').trim(); if (!v) return;
     const act = f.dataset.actSubmit;
+    const v = (f.elements.t.value || '').trim();
+    if (act === 'commSend') { commSend(v); return; }
+    if (!v) return;
+    if (act === 'cloudRestore') { cloudRestore(v); return; }
+    if (act === 'adminLogin') {
+      adminLogin(f.elements.email.value.trim(), v).then(() => closeSheet(() => { toast('🔐 Connecté en admin'); rerender(); loadModeration(); }))
+        .catch(err => toast(/PASSWORD|EMAIL|CREDENTIAL/.test(err.message) ? 'E-mail ou mot de passe incorrect' : 'Connexion impossible (' + err.message + ')'));
+      return;
+    }
     if (act === 'addExtra') { getWeek(ui.week, true).extras.push({ text: v, done: false }); }
     else if (act === 'pantryAdd') { if (!db.pantry.some(x => PM.fold(x) === PM.fold(v))) db.pantry.push(v.charAt(0).toUpperCase() + v.slice(1)); }
+    else if (act === 'avoidAdd') { db.settings.avoid = db.settings.avoid || []; if (!db.settings.avoid.some(x => PM.fold(x) === PM.fold(v))) db.settings.avoid.push(v.toLowerCase()); exclVer++; }
     else if (act === 'tagAdd') { if (!db.tags.includes(v)) db.tags.push(v.charAt(0).toUpperCase() + v.slice(1)); }
     save(); rerender();
     const inp = document.querySelector('form[data-act-submit="' + act + '"] input'); if (inp) inp.focus();
@@ -945,5 +1426,7 @@
   }
   render();
   seedIfNeeded();
+  checkCatalog();
+  if (restoredFromCopy) setTimeout(() => toast('🛟 Tes recettes ont été restaurées depuis la copie de secours'), 800);
   window.__pm = { db: () => db, ui };
 })();
