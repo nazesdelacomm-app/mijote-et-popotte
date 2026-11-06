@@ -385,3 +385,13 @@ body.has-timers #toast { bottom: calc(var(--tabbar-h) + var(--safe-b) + 90px); }
 .card.mod summary { color: var(--accent); font-weight: 600; cursor: pointer; padding: 4px 0; }
 #sheet-root.open ~ #toast { top: calc(14px + env(safe-area-inset-top, 0px)); bottom: auto; transform: translate(-50%, -10px); }
 #sheet-root.open ~ #toast.show { transform: translate(-50%, 0); }
+
+/* ---- v4 : menu en image, quoi de neuf ---- */
+.menu-img { width: 100%; border-radius: 18px; box-shadow: var(--shadow); display: block; margin: 4px 0 6px; }
+.news-head { text-align: center; margin-bottom: 12px; }
+.news-emo { font-size: 48px; line-height: 1.2; }
+.news-head h3 { font-size: 26px; margin: 4px 0 4px; }
+.news-card h2 { font-size: 18px; margin-bottom: 6px; }
+.news-card ul { margin: 0; padding-left: 20px; }
+.news-card li { margin: 6px 0; line-height: 1.4; }
+.sum-btns { flex-wrap: wrap; justify-content: flex-end; }

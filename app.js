@@ -7,7 +7,7 @@
   const COLOR_KEYS = Object.keys(COLORS);
   const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
   const MEALS = [['midi', 'Midi'], ['soir', 'Soir']];
-  const DEFAULT_TAGS = ['Rapide', 'Végé', 'Viande', 'Poisson', 'Soupe', 'Salade', 'Plat complet', 'Léger', 'Gourmand', 'Batch cooking', 'Hiver', 'Été', 'Dessert', 'Apéro'];
+  const DEFAULT_TAGS = ['Rapide', 'Végé', 'Viande', 'Poisson', 'Soupe', 'Salade', 'Plat complet', 'Léger', 'Gourmand', 'Batch cooking', 'Hiver', 'Été', 'Dessert', 'Apéro', 'Enfants', 'Minceur', 'Noël'];
   const DEFAULT_PANTRY = ['Sel', 'Poivre', "Huile d'olive", 'Huile', 'Vinaigre', 'Sucre', 'Farine', 'Moutarde', 'Herbes de Provence', 'Thym', 'Laurier'];
   const EMOJIS = ['🍽️', '🍲', '🥗', '🍝', '🍕', '🍛', '🍜', '🍚', '🥘', '🌮', '🥙', '🍔', '🥪', '🥧', '🍳', '🥞', '🧀', '🐟', '🦐', '🍗', '🥩', '🥕', '🥦', '🍆', '🍄', '🥔', '🌽', '🍅', '🥑', '🫘', '🍰', '🍫', '🍮', '🍎', '🍓', '🍋', '🥐', '🍪', '🧁', '🍹'];
   const AI_LINKS = [['ChatGPT', 'https://chatgpt.com'], ['Gemini', 'https://gemini.google.com'], ['Le Chat', 'https://chat.mistral.ai'], ['Claude', 'https://claude.ai']];
@@ -32,6 +32,7 @@
     const base = defaultDb();
     const out = Object.assign(base, d, { settings: Object.assign(base.settings, d.settings || {}) });
     out.weeks = out.weeks || {}; out.pantry = out.pantry || []; out.tags = out.tags || [];
+    if ((out.settings.tagsV || 0) < 4) { for (const t of ['Enfants', 'Minceur', 'Noël']) if (!out.tags.includes(t)) out.tags.push(t); out.settings.tagsV = 4; }
     out.v = DB_VERSION; return out;
   }
   let restoredFromCopy = false;
@@ -46,6 +47,7 @@
     return defaultDb();
   }
   let db = load();
+  const hadData = Object.keys(db.recipes).length > 0;
   let persistAsked = false;
   function save() {
     try {
@@ -264,7 +266,7 @@
     const portions = entries.reduce((s, e) => s + e.people, 0);
     h += '<div class="summary"><span>' + (entries.length ? plural(entries.length, 'repas', 'repas') + ' · ' + plural(portions, 'portion') : 'Aucun repas prévu') + '</span>' +
       '<span class="sum-btns"><button class="btn small dice" data-act="randomMenu">🎲 ' + (entries.length ? 'Aléatoire' : 'Menu aléatoire') + '</button>' +
-      (entries.length ? '<a class="btn small soft" href="#courses">🛒 Courses</a>' : '') + '</span></div>';
+      (entries.length ? '<a class="btn small soft" href="#courses">🛒 Courses</a><button class="btn small soft" data-act="shareMenuOpen" aria-label="Partager le menu">📤</button>' : '') + '</span></div>';
     for (let d = 0; d < 7; d++) {
       const day = addDays(mon, d); const dk = keyOf(day);
       h += '<section class="day' + (dk === today ? ' today' : '') + (dk < today ? ' past' : '') + '"><h2>' + DAYS[d] + ' <span>' + fmtShort(day) + '</span>' + (dk === today ? '<em>aujourd\'hui</em>' : '') + '</h2>';
@@ -875,7 +877,8 @@
     const recs = ids.map(id => db.recipes[id]).filter(Boolean);
     const pastaCount = recs.filter(isPasta).length;
     const types = {}; for (const r of recs) types[rType(r)] = (types[rType(r)] || 0) + 1;
-    let pool = recipeList().filter(r => !isExcluded(r) && !(r.tags || []).some(t => t === 'Dessert' || t === 'Apéro') && !(exclude && exclude.has(r.id)) && (r.ingredients || []).length);
+    const festive = [10, 11].includes(dateOf(ui.week).getMonth()) || [10, 11].includes(addDays(dateOf(ui.week), 6).getMonth());
+    let pool = recipeList().filter(r => !isExcluded(r) && !(r.tags || []).some(t => t === 'Dessert' || t === 'Apéro') && (festive || !(r.tags || []).includes('Noël')) && !(exclude && exclude.has(r.id)) && (r.ingredients || []).length);
     if (opts.kids) { const k = pool.filter(r => (r.tags || []).includes('Enfants')); if (k.length) pool = k; }
     const quickOk = r => !weekday || !opts.quick || isQuick(r);
     const rules = [
@@ -960,10 +963,7 @@
     }
     return L.join('\n');
   }
-  A.weekShare = () => closeSheet(() => {
-    if (!weekEntries(ui.week).length) { toast('Aucun repas prévu cette semaine'); return; }
-    shareOrCopy({ title: 'Menu de la semaine', text: menuText() }, 'Menu copié ✓');
-  });
+  A.weekShare = () => closeSheet(() => setTimeout(A.shareMenuOpen, 30));
 
   // ================= FAVORIS =================
   A.toggleFav = el => { const r = db.recipes[el.dataset.id]; r.fav = !r.fav; r.updated = Date.now(); save(); rerender(); toast(r.fav ? '⭐ Ajoutée aux favoris' : 'Retirée des favoris'); };
@@ -1346,6 +1346,105 @@
     } catch (e) { toast('Récupération impossible (' + e.message + ')'); }
   }
 
+
+  // ================= MENU EN IMAGE =================
+  function rrect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+  function fitText(ctx, t, max) { if (ctx.measureText(t).width <= max) return t; while (t.length > 1 && ctx.measureText(t + '…').width > max) t = t.slice(0, -1); return t.trim() + '…'; }
+  async function menuImage() {
+    try { await Promise.all(['600 64px Fraunces', '600 40px Fraunces', '500 30px Figtree', '600 30px Figtree', '700 24px Figtree'].map(f => document.fonts.load(f))); } catch (e) { }
+    const w = db.weeks[ui.week]; const mon = dateOf(ui.week);
+    const days = [];
+    for (let d = 0; d < 7; d++) {
+      const rows = [];
+      for (const [m, l] of MEALS) { const items = ((w && w.slots[d + '-' + m]) || []).map(it => ({ r: db.recipes[it.rid], n: it.people })).filter(x => x.r); if (items.length) rows.push({ l, items }); }
+      if (rows.length) days.push({ d, rows });
+    }
+    const W = 1080, P = 60, EMO = "'Noto Color Emoji','Apple Color Emoji','Segoe UI Emoji',sans-serif";
+    let H = 300; for (const day of days) H += 92 + day.rows.reduce((s, r) => s + r.items.length * 70 + 8, 0) + 28 + 24; H += 90;
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const ctx = c.getContext('2d');
+    const g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#FFF1E6'); g.addColorStop(1, '#FFF9F3'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(207,240,226,.8)'; ctx.beginPath(); ctx.arc(W - 70, 60, 170, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(229,222,255,.75)'; ctx.beginPath(); ctx.arc(30, H - 60, 140, 0, 7); ctx.fill();
+    try { const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(LOGO.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" width="110" height="110" ')); await img.decode(); ctx.drawImage(img, P - 6, 62, 110, 110); } catch (e) { }
+    ctx.fillStyle = '#2F2A35'; ctx.font = '600 66px Fraunces, Georgia, serif'; ctx.textBaseline = 'alphabetic'; ctx.fillText('Menu de la semaine', P + 124, 128);
+    const a = mon, b = addDays(mon, 6);
+    ctx.fillStyle = '#E4643F'; ctx.font = '600 32px Figtree, sans-serif';
+    const same = a.getMonth() === b.getMonth();
+    ctx.fillText('du ' + (same ? a.getDate() : a.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })) + ' au ' + b.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }), P + 126, 176);
+    let y = 240;
+    for (const day of days) {
+      const ch = 92 + day.rows.reduce((s, r) => s + r.items.length * 70 + 8, 0) + 28;
+      ctx.save(); ctx.shadowColor = 'rgba(47,42,53,.08)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6; ctx.fillStyle = '#FFFFFF'; rrect(ctx, P, y, W - 2 * P, ch, 30); ctx.fill(); ctx.restore();
+      ctx.fillStyle = '#2F2A35'; ctx.font = '600 40px Fraunces, Georgia, serif'; ctx.fillText(DAYS[day.d], P + 32, y + 62);
+      const dw = ctx.measureText(DAYS[day.d]).width; ctx.fillStyle = '#A59DAC'; ctx.font = '500 28px Figtree, sans-serif'; ctx.fillText(addDays(mon, day.d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }), P + 44 + dw, y + 62);
+      let yy = y + 92;
+      for (const row of day.rows) {
+        ctx.fillStyle = '#A59DAC'; ctx.font = '700 22px Figtree, sans-serif'; ctx.fillText(row.l.toUpperCase(), P + 32, yy + 42);
+        for (const it of row.items) {
+          const x0 = P + 130, wPill = W - 2 * P - 162;
+          ctx.fillStyle = colOf(it.r); rrect(ctx, x0, yy, wPill, 60, 18); ctx.fill();
+          ctx.font = '34px ' + EMO; ctx.fillStyle = '#2F2A35'; ctx.fillText(it.r.emoji, x0 + 16, yy + 43);
+          ctx.font = '600 29px Figtree, sans-serif'; ctx.fillText(fitText(ctx, it.r.title, wPill - 170), x0 + 70, yy + 40);
+          ctx.font = '600 22px Figtree, sans-serif'; ctx.fillStyle = 'rgba(47,42,53,.55)'; const pp = it.n + ' pers.'; ctx.fillText(pp, x0 + wPill - 18 - ctx.measureText(pp).width, yy + 39);
+          yy += 70;
+        }
+        yy += 8;
+      }
+      y += ch + 24;
+    }
+    ctx.fillStyle = '#6F6777'; ctx.font = '500 26px Figtree, sans-serif'; const ft = 'Préparé avec Popote & Mijote'; ctx.fillText(ft, (W - ctx.measureText(ft).width) / 2, H - 40);
+    return c;
+  }
+  function shareMenuSheet() {
+    return '<h3 class="sheet-title">Partager le menu</h3><div class="options">' +
+      '<button data-act="menuImg"><span>🖼️</span><b>En image</b><small>Parfait pour WhatsApp, ou à afficher sur le frigo</small></button>' +
+      '<button data-act="menuTxt"><span>📝</span><b>En texte</b><small>La liste jour par jour</small></button></div>';
+  }
+  A.shareMenuOpen = () => { if (!weekEntries(ui.week).length) { toast('Aucun repas prévu cette semaine'); return; } openSheet(shareMenuSheet); };
+  A.menuTxt = () => closeSheet(() => shareOrCopy({ title: 'Menu de la semaine', text: menuText() }, 'Menu copié ✓'));
+  A.menuImg = async () => {
+    sheetFn = () => '<h3 class="sheet-title">🖼️ Ton menu en image</h3><p class="muted center pad">Préparation de l\'image…</p>'; drawSheet();
+    try {
+      const c = await menuImage();
+      ui.menuBlob = await new Promise(r => c.toBlob(r, 'image/png'));
+      if (ui.menuUrl) URL.revokeObjectURL(ui.menuUrl); ui.menuUrl = URL.createObjectURL(ui.menuBlob);
+      sheetFn = () => '<h3 class="sheet-title">🖼️ Ton menu en image</h3><img class="menu-img" src="' + ui.menuUrl + '" alt="Menu de la semaine">' +
+        '<div class="btn-row"><button class="btn soft" data-act="menuImgSave">⬇️ Enregistrer</button><button class="btn primary" data-act="menuImgShare">↗ Partager</button></div>';
+      drawSheet();
+    } catch (e) { toast('Image impossible à créer'); }
+  };
+  A.menuImgShare = async () => {
+    const f = new File([ui.menuBlob], 'menu-semaine.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f], title: 'Menu de la semaine' }); } catch (e) { } }
+    else A.menuImgSave();
+  };
+  A.menuImgSave = () => { const a = document.createElement('a'); a.href = ui.menuUrl; a.download = 'menu-semaine-' + ui.week + '.png'; document.body.appendChild(a); a.click(); a.remove(); toast('Image enregistrée ✓'); };
+
+  // ================= QUOI DE NEUF (une seule fois après une mise à jour) =================
+  const APP_VERSION = 4;
+  const CHANGELOG = [
+    { v: 3, title: '🌍 Communauté & sécurité', items: ['Nouvel onglet <b>Communauté</b> : découvre les recettes des autres et propose les tiennes', 'Bandeau <b>📚 Catalogue</b> quand de nouvelles recettes sont disponibles : tu choisis ce que tu ajoutes', '<b>Allergies & exclusions</b> (Plus) : les recettes concernées sont masquées partout', '<b>Sauvegarde en ligne</b> avec un code personnel (Plus → Sauvegarde)'] },
+    { v: 4, title: '🎄 Minceur, Noël & menu en image', items: ['<b>51 recettes Minceur</b> (tag « Minceur »), avec une estimation des calories', '<b>31 recettes de Noël</b> (tag « Noël ») : apéro, plats de fête, bûche, sablés…', '<b>Partage du menu en image</b> : bouton 📤 sur l\'onglet Semaine, idéal pour WhatsApp', 'Ce petit récapitulatif, à chaque mise à jour'], starter: true },
+  ];
+  function whatsNew() {
+    const seen = db.settings.seenVersion;
+    if (seen === APP_VERSION) return;
+    db.settings.seenVersion = APP_VERSION; save();
+    if (seen == null && !hadData) return; // première installation : pas de récap
+    const list = CHANGELOG.filter(c => c.v > (seen || 2));
+    if (!list.length) return;
+    const starter = list.some(c => c.starter);
+    setTimeout(() => openSheet(() => '<div class="news-head"><div class="news-emo">🎉</div><h3>Quoi de neuf ?</h3><p class="muted small">Popote & Mijote vient d\'être mise à jour. Tes recettes sont intactes.</p></div>' +
+      list.map(c => '<div class="card news-card"><h2>' + c.title + '</h2><ul>' + c.items.map(i => '<li>' + i + '</li>').join('') + '</ul></div>').join('') +
+      (starter ? '<button class="btn soft wide" data-act="newsStarter">📥 Ajouter les nouvelles recettes à mon livre</button><div style="height:10px"></div>' : '') +
+      '<button class="btn primary wide big" data-act="closeSheet">C\'est parti !</button>'), 700);
+  }
+  A.newsStarter = async el => {
+    el.disabled = true; el.textContent = 'Ajout en cours…';
+    try { const n = await loadStarter(true); exclVer++; toast(n ? '📥 ' + plural(n, 'recette ajoutée', 'recettes ajoutées') + ' ✓' : 'Tu as déjà toutes ces recettes ✓'); el.textContent = '✓ ' + plural(n, 'recette ajoutée', 'recettes ajoutées'); rerender(); }
+    catch (e) { toast('Pas de connexion : réessaie via Plus → Recettes de départ'); el.disabled = false; el.textContent = '📥 Ajouter les nouvelles recettes à mon livre'; }
+  };
+
   // ================= SAISIES =================
   const I = {};
   I.q = el => { ui.q = el.value; $('#rec-list').innerHTML = recipeCards(); };
@@ -1379,7 +1478,12 @@
     el.value = '';
   };
   // recettes de départ (fichier recettes.json à côté de l'app)
-  async function loadStarter() { const r = await fetch('recettes.json', { cache: 'no-cache' }); if (!r.ok) throw new Error('absent'); return mergeData(await r.json()); }
+  async function loadStarter(skipDeleted) {
+    const r = await fetch('recettes.json', { cache: 'no-cache' }); if (!r.ok) throw new Error('absent');
+    const d = await r.json();
+    if (skipDeleted) { const dis = db.settings.catalogDismissed || {}; for (const id of Object.keys(d.recipes || {})) if (dis[id]) delete d.recipes[id]; }
+    return mergeData(d);
+  }
   async function seedIfNeeded() {
     if (db.settings.seeded || Object.keys(db.recipes).length) return;
     try { const n = await loadStarter(); db.settings.seeded = true; save(); render(true); if (n) toast('📚 ' + n + ' recettes de départ chargées'); } catch (e) { }
@@ -1427,6 +1531,7 @@
   render();
   seedIfNeeded();
   checkCatalog();
+  whatsNew();
   if (restoredFromCopy) setTimeout(() => toast('🛟 Tes recettes ont été restaurées depuis la copie de secours'), 800);
   window.__pm = { db: () => db, ui };
 })();

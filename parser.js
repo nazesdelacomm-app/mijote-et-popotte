@@ -306,6 +306,9 @@
 
   // ---------- Emoji ----------
   const EMOJI_RULES = [
+    ['🎄', 'buche|sables de noel'], ['🍪', 'sable|pain d\'epices'], ['🍷', 'vin chaud'], ['☕', 'chocolat chaud'], ['🍬', 'truffes au chocolat|mendiant'],
+    ['🦃', 'dinde farcie|chapon|pintade'], ['🥂', 'foie gras|blinis|toasts|verrine|gravlax|feuillete'], ['🍄', 'wellington vegetarien|poelee de champignons'],
+    ['🫘', 'lentille|dahl'], ['🍓', 'fromage blanc aux fruits|fruits rouges'], ['🥦', 'tofu|brocoli'], ['🐟', 'colin|saumon|cabillaud'], ['🫛', 'haricots verts|fagots'],
     ['🍝', 'macaroni|mac and|coquillette|tortellini|cannelloni|one pot pasta|cacio'], ['🥘', 'paella|jambalaya|navarin|goulash'],
     ['🫑', 'poivrons farcis'], ['🍅', 'tomates farcies|gaspacho|tian|soupe a la tomate|bruschetta'], ['🥒', 'courgettes farcies'], ['🍆', 'moussaka'], ['🥬', 'endive|poireau'],
     ['🥩', 'escalope|filet mignon|kefta|brochettes de boeuf'], ['🌭', 'hot dog'], ['🐟', 'brandade|fish|lieu|morue'],
