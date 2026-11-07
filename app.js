@@ -61,7 +61,7 @@
     }
     catch (e) { toast("Impossible d'enregistrer sur ce téléphone"); }
     if (!persistAsked) { persistAsked = true; try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) { } }
-    if (typeof cloudSoon === 'function') cloudSoon();
+    if (typeof cloudSoon === 'function') { cloudSoon(); usageSoon(); }
   }
   const recipeList = () => Object.values(db.recipes).sort((a, b) => a.title.localeCompare(b.title, 'fr'));
   function getWeek(k, create) {
@@ -456,6 +456,7 @@
     h += '<a href="#placard"><span class="mi">🏠</span><span class="mt"><b>Mon placard</b><small>' + plural(db.pantry.length, 'ingrédient') + ' toujours à la maison</small></span><span class="chev">›</span></a>';
     h += '<a href="#tags"><span class="mi">🏷</span><span class="mt"><b>Mes tags</b><small>' + db.tags.length + ' tags</small></span><span class="chev">›</span></a>';
     const nEx = (db.settings.allergens || []).length + (db.settings.diets || []).length + (db.settings.avoid || []).length;
+    h += '<a href="#stats"><span class="mi">📊</span><span class="mt"><b>Mes statistiques</b><small>Tes habitudes, tes recettes préférées</small></span><span class="chev">›</span></a>';
     h += '<a href="#exclusions"><span class="mi">🚫</span><span class="mt"><b>Allergies & exclusions</b><small>' + (nEx ? plural(nEx, 'critère actif', 'critères actifs') : 'Aucune pour l\'instant') + '</small></span><span class="chev">›</span></a>';
     h += '<div class="mrow"><span class="mi">👥</span><span class="mt"><b>Personnes par défaut</b><small>Pour les nouveaux repas</small></span>' + stepper(db.settings.people, 'defPeople') + '</div>';
     const old = !db.settings.lastExport || (Date.now() - db.settings.lastExport > 30 * 864e5);
@@ -473,6 +474,7 @@
       h += '<h3 class="menu-title">🛡️ Admin · ' + esc(sess.admin.email) + '</h3><div class="menu">' +
         '<a href="#moderation"><span class="mi">🛡️</span><span class="mt"><b>Modération</b><small>Recettes proposées par la communauté</small></span>' + (nm ? '<span class="badge">' + nm + '</span>' : '<span class="chev">›</span>') + '</a>' +
         '<button class="mrow" data-act="publishAll"><span class="mi">📚</span><span class="mt"><b>Publier dans le catalogue</b><small>' + (tp ? plural(tp, 'recette', 'recettes') + ' nouvelles ou modifiées' : 'Tout est publié ✓') + '</small></span><span class="chev">›</span></button>' +
+        '<a href="#stats-admin"><span class="mi">📈</span><span class="mt"><b>Usage de l\'appli</b><small>Utilisateurs actifs, recettes les plus utilisées</small></span><span class="chev">›</span></a>' +
         '<button class="mrow" data-act="adminLogout"><span class="mi">🚪</span><span class="mt"><b>Se déconnecter</b></span></button></div>';
     }
     h += '<div><p class="foot">' + LOGO + '<br>Popote &amp; Mijote<br><small>Tes recettes restent sur ce téléphone.</small>' + (ONLINE && !isAdmin() ? '<br><button class="link small" data-act="adminOpen">Espace admin</button>' : '') + '</p></div>';
@@ -601,6 +603,8 @@
     else if (h.startsWith('communaute-')) { html = viewCommunityRecipe(h.slice(11)); tab = 'communaute'; }
     else if (h === 'communaute') { html = viewCommunity(); tab = 'communaute'; }
     else if (h === 'moderation') { html = viewModeration(); tab = 'plus'; }
+    else if (h === 'stats') { html = viewStats(); tab = 'plus'; }
+    else if (h === 'stats-admin') { html = viewAdminStats(); tab = 'plus'; }
     else { location.hash = '#semaine'; return; }
     const app = $('#app');
     app.innerHTML = html;
@@ -863,7 +867,14 @@
     return t(r.title) || (r.ingredients || []).some(i => t(i.name));
   }
   const isQuick = r => (r.time && r.time <= 30) || (r.tags || []).includes('Rapide');
-  const rType = r => { const t = r.tags || []; return t.includes('Poisson') ? 'poisson' : t.includes('Viande') ? 'viande' : t.includes('Végé') ? 'vege' : 'autre'; };
+  const FISH_RE = /(^|[^a-z])(poisson|saumon|cabillaud|thon|sardine|anchois|colin|lieu|merlu|truite|dorade|maquereau|haddock|morue|crevette|moule|calamar|saint-jacques|surimi|gambas)/;
+  const rType = r => {
+    const t = r.tags || []; if (t.includes('Poisson')) return 'poisson'; if (t.includes('Viande')) return 'viande'; if (t.includes('Végé')) return 'vege';
+    const ings = r.ingredients || []; if (!ings.length) return 'autre';
+    if (ings.some(i => FISH_RE.test(PM.fold(i.name)))) return 'poisson';
+    if (ings.some(i => i.cat === 'vp')) return 'viande';
+    return (t.includes('Dessert') || t.includes('Apéro')) ? 'autre' : 'vege';
+  };
   function rndOpts() { const s = db.settings; return { quick: s.rndQuick !== false, kids: !!s.rndKids }; }
   function weekIds(wk, skipSk, skipI) {
     const w = db.weeks[wk]; const ids = [];
@@ -1037,9 +1048,11 @@
     const j = await authPost('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + CFG.apiKey, { email, password, returnSecureToken: true });
     sess.admin = { email, idToken: j.idToken, refreshToken: j.refreshToken, uid: j.localId, exp: Date.now() + (+j.expiresIn) * 1000 }; saveSess();
   }
-  const fv = v => typeof v === 'number' ? (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v }) : typeof v === 'boolean' ? { booleanValue: v } : { stringValue: String(v == null ? '' : v) };
+  const fv = v => typeof v === 'number' ? (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v }) : typeof v === 'boolean' ? { booleanValue: v } : (v && typeof v === 'object') ? { mapValue: { fields: toFields(v) } } : { stringValue: String(v == null ? '' : v) };
   const toFields = o => { const f = {}; for (const k in o) f[k] = fv(o[k]); return f; };
-  const fromDoc = d => { const o = { _id: d.name.split('/').pop() }; for (const [k, v] of Object.entries(d.fields || {})) o[k] = 'stringValue' in v ? v.stringValue : 'integerValue' in v ? +v.integerValue : 'doubleValue' in v ? v.doubleValue : 'booleanValue' in v ? v.booleanValue : null; return o; };
+  const fromVal = v => 'stringValue' in v ? v.stringValue : 'integerValue' in v ? +v.integerValue : 'doubleValue' in v ? v.doubleValue : 'booleanValue' in v ? v.booleanValue : 'mapValue' in v ? fromFields(v.mapValue.fields) : null;
+  const fromFields = f => { const o = {}; for (const [k, v] of Object.entries(f || {})) o[k] = fromVal(v); return o; };
+  const fromDoc = d => Object.assign(fromFields(d.fields), { _id: d.name.split('/').pop() });
   async function fsReq(method, path, body, auth) {
     const h = { 'Content-Type': 'application/json' };
     if (auth) h.Authorization = 'Bearer ' + await idToken(auth);
@@ -1049,9 +1062,9 @@
     if (!r.ok) throw new Error(r.status === 403 ? 'accès refusé' : (j.error && j.error.message) || ('erreur ' + r.status));
     return j;
   }
-  async function listAll(coll) {
+  async function listAll(coll, auth) {
     let out = [], tok = '';
-    do { const j = await fsReq('GET', '/' + coll + '?pageSize=300' + (tok ? '&pageToken=' + encodeURIComponent(tok) : '')); if (!j) break; out = out.concat((j.documents || []).map(fromDoc)); tok = j.nextPageToken; } while (tok);
+    do { const j = await fsReq('GET', '/' + coll + '?pageSize=300' + (tok ? '&pageToken=' + encodeURIComponent(tok) : ''), null, auth); if (!j) break; out = out.concat((j.documents || []).map(fromDoc)); tok = j.nextPageToken; } while (tok);
     return out;
   }
   async function queryStatus(coll, status, auth) {
@@ -1421,10 +1434,11 @@
   A.menuImgSave = () => { const a = document.createElement('a'); a.href = ui.menuUrl; a.download = 'menu-semaine-' + ui.week + '.png'; document.body.appendChild(a); a.click(); a.remove(); toast('Image enregistrée ✓'); };
 
   // ================= QUOI DE NEUF (une seule fois après une mise à jour) =================
-  const APP_VERSION = 4;
+  const APP_VERSION = 5;
   const CHANGELOG = [
     { v: 3, title: '🌍 Communauté & sécurité', items: ['Nouvel onglet <b>Communauté</b> : découvre les recettes des autres et propose les tiennes', 'Bandeau <b>📚 Catalogue</b> quand de nouvelles recettes sont disponibles : tu choisis ce que tu ajoutes', '<b>Allergies & exclusions</b> (Plus) : les recettes concernées sont masquées partout', '<b>Sauvegarde en ligne</b> avec un code personnel (Plus → Sauvegarde)'] },
     { v: 4, title: '🎄 Minceur, Noël & menu en image', items: ['<b>51 recettes Minceur</b> (tag « Minceur »), avec une estimation des calories', '<b>31 recettes de Noël</b> (tag « Noël ») : apéro, plats de fête, bûche, sablés…', '<b>Partage du menu en image</b> : bouton 📤 sur l\'onglet Semaine, idéal pour WhatsApp', 'Ce petit récapitulatif, à chaque mise à jour'], starter: true },
+    { v: 5, title: '📊 Tes statistiques', items: ['<b>Mes statistiques</b> (Plus) : repas planifiés par semaine, tes recettes les plus cuisinées, l\'équilibre viande / poisson / végé', 'Une rubrique <b>À redécouvrir</b> avec les recettes que tu aimais et qui ne sont pas revenues depuis un moment'] },
   ];
   function whatsNew() {
     const seen = db.settings.seenVersion;
@@ -1444,6 +1458,120 @@
     try { const n = await loadStarter(true); exclVer++; toast(n ? '📥 ' + plural(n, 'recette ajoutée', 'recettes ajoutées') + ' ✓' : 'Tu as déjà toutes ces recettes ✓'); el.textContent = '✓ ' + plural(n, 'recette ajoutée', 'recettes ajoutées'); rerender(); }
     catch (e) { toast('Pas de connexion : réessaie via Plus → Recettes de départ'); el.disabled = false; el.textContent = '📥 Ajouter les nouvelles recettes à mon livre'; }
   };
+
+
+  // ================= STATISTIQUES =================
+  const TYPE_LABEL = { viande: '🍗 Viande', poisson: '🐟 Poisson', vege: '🥕 Végé', autre: '🍽️ Autre' };
+  function bars(rows, opts) { // rows : [{label, value, sub}] — barres horizontales, une seule teinte
+    opts = opts || {}; const max = Math.max(1, ...rows.map(r => r.value));
+    return '<div class="hbars">' + rows.map(r => '<div class="hb"><span class="hb-l">' + r.label + '</span><span class="hb-t"><i style="width:' + Math.max(2, Math.round(r.value / max * 100)) + '%"></i></span><b>' + (opts.fmt ? opts.fmt(r.value) : r.value) + '</b></div>').join('') + '</div>';
+  }
+  function colChart(cols) { // cols : [{label, value}] — colonnes verticales, valeur au-dessus
+    const max = Math.max(1, ...cols.map(c => c.value));
+    return '<div class="vbars">' + cols.map(c => '<div class="vb" title="' + esc(c.label) + ' : ' + c.value + '"><b>' + (c.value || '') + '</b><i style="height:' + (c.value ? Math.max(4, Math.round(c.value / max * 100)) : 0) + '%"></i><span>' + esc(c.label) + '</span></div>').join('') + '</div>';
+  }
+  const tile = (v, l) => '<div class="tile"><b>' + v + '</b><span>' + l + '</span></div>';
+  const lastWeeks = n => { const out = []; let k = keyOf(mondayOf(new Date())); for (let i = 0; i < n; i++) { out.unshift(k); k = keyOf(addDays(dateOf(k), -7)); } return out; };
+  const shortWeek = k => { const d = dateOf(k); return d.getDate() + '/' + (d.getMonth() + 1); };
+  function myStats() {
+    const counts = {}, types = { viande: 0, poisson: 0, vege: 0, autre: 0 }, perWeek = {}, last = {};
+    let meals = 0, people = 0, timeSum = 0, timeN = 0;
+    for (const [k, w] of Object.entries(db.weeks)) for (const items of Object.values(w.slots || {})) for (const it of items) {
+      const r = db.recipes[it.rid]; if (!r) continue;
+      meals++; people += it.people; counts[r.id] = (counts[r.id] || 0) + 1; types[rType(r)]++; perWeek[k] = (perWeek[k] || 0) + 1;
+      if (!last[r.id] || k > last[r.id]) last[r.id] = k;
+      if (r.time) { timeSum += r.time; timeN++; }
+    }
+    return { counts, types, perWeek, last, meals, people, avgTime: timeN ? Math.round(timeSum / timeN) : 0, weeks: Object.keys(perWeek).length };
+  }
+  function viewStats() {
+    let h = '<header class="top"><button class="round ghost" data-act="back" data-to="plus" aria-label="Retour">‹</button><h1>Mes statistiques</h1></header>';
+    const s = myStats();
+    if (!s.meals) return h + emptyState('📊', 'Pas encore de statistiques', 'Planifie quelques semaines de menus : tes habitudes apparaîtront ici.', '<a class="btn primary" href="#semaine">Planifier la semaine</a>') + statsOptOut();
+    const distinct = Object.keys(s.counts).length, total = Object.keys(db.recipes).length;
+    h += '<div class="tiles">' + tile(s.meals, 'repas planifiés') + tile(s.weeks, plural(s.weeks, 'semaine', 'semaines').replace(/^\d+ /, '')) + tile(distinct, 'recettes différentes') + tile(Math.round(distinct / Math.max(1, total) * 100) + ' %', 'de ton livre cuisiné') + '</div>';
+    h += '<div class="card"><h2>Repas par semaine</h2><p class="muted small">12 dernières semaines</p>' + colChart(lastWeeks(12).map(k => ({ label: shortWeek(k), value: s.perWeek[k] || 0 }))) + '</div>';
+    const top = Object.entries(s.counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    h += '<div class="card"><h2>Tes recettes les plus cuisinées</h2>' + bars(top.map(([id, n]) => ({ label: db.recipes[id].emoji + ' ' + esc(db.recipes[id].title), value: n })), { fmt: n => n + '×' }) + '</div>';
+    const tsum = Object.values(s.types).reduce((a, b) => a + b, 0) || 1;
+    h += '<div class="card"><h2>Équilibre des repas</h2>' + bars(Object.entries(s.types).filter(([, n]) => n).map(([t, n]) => ({ label: TYPE_LABEL[t], value: Math.round(n / tsum * 100) })), { fmt: n => n + ' %' }) +
+      (s.avgTime ? '<p class="muted small">⏱ Temps moyen de préparation : <b>' + fmtTime(s.avgTime) + '</b></p>' : '') + '</div>';
+    const cur = keyOf(mondayOf(new Date()));
+    const forgotten = Object.entries(s.last).filter(([id, k]) => (dateOf(cur) - dateOf(k)) / 864e5 >= 42).sort((a, b) => (s.counts[b[0]] - s.counts[a[0]])).slice(0, 5);
+    const never = total - distinct;
+    h += '<div class="card"><h2>À redécouvrir</h2>' + (forgotten.length ? '<p class="muted small">Tu les aimais, mais elles ne sont pas revenues depuis plus de 6 semaines :</p><div class="rlist">' + forgotten.map(([id]) => { const r = db.recipes[id]; return '<a class="rcard" href="#recette-' + id + '" style="--c:' + colOf(r) + '"><span class="emo">' + r.emoji + '</span><span class="rt"><b>' + esc(r.title) + '</b><small>' + plural(s.counts[id], 'fois', 'fois') + ' · dernière : semaine du ' + shortWeek(s.last[id]) + '</small></span><span class="chev">›</span></a>'; }).join('') + '</div>' : '<p class="muted small">Rien d\'oublié pour l\'instant 👌</p>') +
+      '<p class="muted small">📖 ' + plural(never, 'recette', 'recettes') + ' de ton livre n\'ont encore jamais été au menu.</p></div>';
+    return h + statsOptOut();
+  }
+  function statsOptOut() {
+    if (!ONLINE) return '';
+    return '<div class="toggles"><button class="toggle' + (db.settings.noStats ? '' : ' on') + '" data-act="toggleStats"><span>Partager des statistiques d\'usage anonymes<br><small class="muted">Nombre de repas et recettes utilisées, sans nom ni allergies. Sert à améliorer l\'appli.</small></span><i></i></button></div>';
+  }
+  A.toggleStats = () => { db.settings.noStats = !db.settings.noStats; save(); rerender(); };
+
+  // ---------- envoi des statistiques d'usage (anonymes, agrégées par semaine) ----------
+  const DKEY = 'popote-mijote-appareil', UKEY = 'popote-mijote-stats-envoyees';
+  const deviceId = (() => { try { let d = localStorage.getItem(DKEY); if (!d) { d = 'd' + Math.random().toString(36).slice(2, 12); localStorage.setItem(DKEY, d); } return d; } catch (e) { return 'dtemp'; } })();
+  function weekSummary(k) {
+    const w = db.weeks[k]; if (!w) return null;
+    const recipes = {}, types = { viande: 0, poisson: 0, vege: 0, autre: 0 }; let meals = 0, people = 0;
+    for (const items of Object.values(w.slots || {})) for (const it of items) { const r = db.recipes[it.rid]; if (!r) continue; meals++; people += it.people; recipes[r.id] = (recipes[r.id] || 0) + 1; types[rType(r)]++; }
+    if (!meals) return null;
+    return { device: deviceId, week: k, meals, people, recipes, types, v: APP_VERSION };
+  }
+  let usageT = null;
+  function usageSoon(delay) { if (!ONLINE || db.settings.noStats) return; clearTimeout(usageT); usageT = setTimeout(sendUsage, delay || 30000); }
+  async function sendUsage() {
+    if (!ONLINE || db.settings.noStats || !navigator.onLine) return;
+    let sent = {}; try { sent = JSON.parse(localStorage.getItem(UKEY)) || {}; } catch (e) { }
+    const weeks = lastWeeks(12).concat([keyOf(addDays(mondayOf(new Date()), 7)), keyOf(addDays(mondayOf(new Date()), 14))]);
+    for (const k of weeks) {
+      const s = weekSummary(k); if (!s) continue;
+      const sig = JSON.stringify([s.meals, s.people, s.recipes, s.v]); if (sent[k] === sig) continue;
+      try { await fsReq('PATCH', '/usage/' + deviceId + '_' + k, { fields: toFields(Object.assign(s, { at: Date.now() })) }, 'anon'); sent[k] = sig; } catch (e) { break; }
+    }
+    try { localStorage.setItem(UKEY, JSON.stringify(sent)); } catch (e) { }
+  }
+
+  // ---------- tableau de bord admin ----------
+  ui.ustats = null;
+  async function loadUsage() {
+    ui.ustatsLoading = true;
+    try { ui.ustats = await listAll('usage', 'admin'); ui.ustatsErr = null; } catch (e) { ui.ustatsErr = e.message; }
+    ui.ustatsLoading = false; ui.ustatsAt = Date.now(); if (ui.route === 'stats-admin') render(true);
+  }
+  function viewAdminStats() {
+    let h = '<header class="top"><button class="round ghost" data-act="back" data-to="plus" aria-label="Retour">‹</button><h1>Usage de l\'appli</h1><button class="round ghost" data-act="ustatsRefresh" aria-label="Actualiser">↻</button></header>';
+    if (!isAdmin()) return h + emptyState('🔐', 'Réservé à l\'admin', '', '');
+    if (!ui.ustats && !ui.ustatsLoading) loadUsage();
+    if (!ui.ustats) return h + (ui.ustatsErr ? '<div class="banner warn">' + esc(ui.ustatsErr) + '<br><small>As-tu bien ajouté le bloc « usage » dans les règles Firestore ?</small></div>' : '<p class="muted center pad">Chargement…</p>');
+    const docs = ui.ustats; if (!docs.length) return h + emptyState('📈', 'Pas encore de données', 'Les statistiques arrivent dès que des utilisateurs planifient des repas.', '');
+    const weeks12 = lastWeeks(12), w4 = new Set(lastWeeks(4)), cur = keyOf(mondayOf(new Date()));
+    const devices = new Set(), active = new Set(), perWeekDev = {}, perWeekMeals = {}, recipes = {}, types = { viande: 0, poisson: 0, vege: 0, autre: 0 }, ver = {};
+    const lastSeen = {};
+    let meals = 0;
+    for (const d of docs) {
+      devices.add(d.device); if (w4.has(d.week) || d.week > cur) active.add(d.device);
+      (perWeekDev[d.week] = perWeekDev[d.week] || new Set()).add(d.device); perWeekMeals[d.week] = (perWeekMeals[d.week] || 0) + (d.meals || 0); meals += d.meals || 0;
+      for (const [id, n] of Object.entries(d.recipes || {})) recipes[id] = (recipes[id] || 0) + n;
+      for (const [t, n] of Object.entries(d.types || {})) types[t] = (types[t] || 0) + n;
+      if (!lastSeen[d.device] || d.at > lastSeen[d.device].at) lastSeen[d.device] = d;
+    }
+    for (const d of Object.values(lastSeen)) ver['v' + (d.v || '?')] = (ver['v' + (d.v || '?')] || 0) + 1;
+    const titles = {}; for (const r of Object.values(db.recipes)) titles[r.id] = r.emoji + ' ' + r.title;
+    if (catalog) for (const it of catalog.items) if (!titles[it.id]) titles[it.id] = it.title;
+    if (ui.comm && ui.comm.list) for (const x of ui.comm.list) if (!titles[x.recipe.id]) titles[x.recipe.id] = x.recipe.emoji + ' ' + x.recipe.title;
+    h += '<div class="tiles">' + tile(active.size, 'actifs (4 sem.)') + tile(devices.size, 'téléphones au total') + tile(meals, 'repas planifiés') + tile(Object.keys(recipes).length, 'recettes utilisées') + '</div>';
+    h += '<div class="card"><h2>Utilisateurs actifs par semaine</h2>' + colChart(weeks12.map(k => ({ label: shortWeek(k), value: perWeekDev[k] ? perWeekDev[k].size : 0 }))) + '</div>';
+    h += '<div class="card"><h2>Repas planifiés par semaine</h2><p class="muted small">Tous utilisateurs confondus</p>' + colChart(weeks12.map(k => ({ label: shortWeek(k), value: perWeekMeals[k] || 0 }))) + '</div>';
+    const top = Object.entries(recipes).sort((a, b) => b[1] - a[1]).slice(0, 15);
+    h += '<div class="card"><h2>Recettes les plus utilisées</h2>' + bars(top.map(([id, n]) => ({ label: esc(titles[id] || '🔒 Recette perso'), value: n })), { fmt: n => n + '×' }) + '</div>';
+    const tsum = Object.values(types).reduce((a, b) => a + b, 0) || 1;
+    h += '<div class="card"><h2>Équilibre des repas</h2>' + bars(Object.entries(types).filter(([, n]) => n).map(([t, n]) => ({ label: TYPE_LABEL[t], value: Math.round(n / tsum * 100) })), { fmt: n => n + ' %' }) + '</div>';
+    h += '<div class="card"><h2>Versions installées</h2><p class="muted small">Pour voir qui a bien reçu la dernière mise à jour.</p>' + bars(Object.entries(ver).sort().reverse().map(([v, n]) => ({ label: v === 'v' + APP_VERSION ? v + ' (actuelle)' : v, value: n })), { fmt: n => plural(n, 'tél.', 'tél.') }) + '</div>';
+    return h;
+  }
+  A.ustatsRefresh = () => { ui.ustats = null; rerender(); };
 
   // ================= SAISIES =================
   const I = {};
@@ -1479,7 +1607,7 @@
   };
   // recettes de départ (fichier recettes.json à côté de l'app)
   async function loadStarter(skipDeleted) {
-    const r = await fetch('recettes.json', { cache: 'no-cache' }); if (!r.ok) throw new Error('absent');
+    const r = await fetch('recettes.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) throw new Error('absent');
     const d = await r.json();
     if (skipDeleted) { const dis = db.settings.catalogDismissed || {}; for (const id of Object.keys(d.recipes || {})) if (dis[id]) delete d.recipes[id]; }
     return mergeData(d);
@@ -1532,6 +1660,7 @@
   seedIfNeeded();
   checkCatalog();
   whatsNew();
+  usageSoon(8000);
   if (restoredFromCopy) setTimeout(() => toast('🛟 Tes recettes ont été restaurées depuis la copie de secours'), 800);
   window.__pm = { db: () => db, ui };
 })();

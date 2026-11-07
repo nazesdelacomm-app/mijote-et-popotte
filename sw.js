@@ -1,5 +1,5 @@
 /* Popote & Mijote — fonctionnement hors ligne */
-const CACHE = 'popote-mijote-v4';
+const CACHE = 'popote-mijote-v6';
 const FILES = ['./', './index.html', './styles.css', './app.js', './parser.js', './config.js', './recettes.json', './manifest.webmanifest',
   './icon-192.png', './icon-512.png', './maskable-512.png', './apple-touch-icon.png',
   './fraunces.woff2', './figtree-400.woff2', './figtree-500.woff2', './figtree-600.woff2', './figtree-700.woff2'];
@@ -18,10 +18,11 @@ self.addEventListener('fetch', e => {
     const cache = await caches.open(CACHE);
     try {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 2500);
+      const big = /\.json(\?|$)/.test(req.url); // le livre de recettes est plus lourd : on lui laisse le temps
+      const t = setTimeout(() => ctrl.abort(), big ? 20000 : 2500);
       const res = await fetch(req, { signal: ctrl.signal, cache: 'no-cache' });
       clearTimeout(t);
-      if (res.ok) cache.put(req.mode === 'navigate' ? './index.html' : req, res.clone());
+      if (res.ok) cache.put(req.mode === 'navigate' ? './index.html' : (/recettes\.json/.test(req.url) ? './recettes.json' : req), res.clone());
       return res;
     } catch (err) {
       const hit = await cache.match(req.mode === 'navigate' ? './index.html' : req, { ignoreSearch: true });
