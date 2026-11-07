@@ -395,3 +395,21 @@ body.has-timers #toast { bottom: calc(var(--tabbar-h) + var(--safe-b) + 90px); }
 .news-card ul { margin: 0; padding-left: 20px; }
 .news-card li { margin: 6px 0; line-height: 1.4; }
 .sum-btns { flex-wrap: wrap; justify-content: flex-end; }
+
+/* ---- v5 : statistiques ---- */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.tile { background: var(--surface); border-radius: 18px; padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; }
+.tile b { font: 600 30px/1.1 'Fraunces', serif; color: var(--ink); }
+.tile span { color: var(--ink-2); font-size: 13.5px; margin-top: 4px; }
+.hbars { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 4px; }
+.hb { display: grid; grid-template-columns: minmax(0, 1.25fr) 1fr auto; gap: 10px; align-items: center; font-size: 14.5px; }
+.hb-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hb-t { height: 12px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+.hb-t i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.hb b { font-weight: 700; color: var(--ink-2); font-size: 14px; min-width: 34px; text-align: right; }
+.vbars { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; height: 170px; align-items: end; margin-top: 8px; }
+.vb { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
+.vb i { width: 100%; max-width: 26px; background: var(--accent); border-radius: 6px 6px 2px 2px; }
+.vb b { font-size: 12px; color: var(--ink-2); margin-bottom: 3px; font-weight: 600; }
+.vb span { font-size: 10.5px; color: var(--ink-3); margin-top: 6px; white-space: nowrap; }
+.toggle small { font-weight: 400; font-size: 12.5px; }
