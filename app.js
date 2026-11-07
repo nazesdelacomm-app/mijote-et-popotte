@@ -1612,9 +1612,21 @@
     if (skipDeleted) { const dis = db.settings.catalogDismissed || {}; for (const id of Object.keys(d.recipes || {})) if (dis[id]) delete d.recipes[id]; }
     return mergeData(d);
   }
+  // Livre de départ : quand une mise à jour apporte de nouvelles recettes, elles sont ajoutées automatiquement (une seule fois)
+  const STARTER_VERSION = 4;
+  async function autoStarter() {
+    if (!hadData || (db.settings.starterV || 0) >= STARTER_VERSION) return;
+    try {
+      const r = await fetch('recettes.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
+      const d = await r.json(); if ((d.version || 0) < STARTER_VERSION) return; // fichier pas encore à jour : on réessaiera
+      const dis = db.settings.catalogDismissed || {}; for (const id of Object.keys(d.recipes || {})) if (dis[id]) delete d.recipes[id];
+      const n = mergeData(d); db.settings.starterV = STARTER_VERSION; exclVer++; save();
+      if (n) { toast('📚 ' + plural(n, 'nouvelle recette ajoutée', 'nouvelles recettes ajoutées') + ' à ton livre'); render(true); }
+    } catch (e) { }
+  }
   async function seedIfNeeded() {
     if (db.settings.seeded || Object.keys(db.recipes).length) return;
-    try { const n = await loadStarter(); db.settings.seeded = true; save(); render(true); if (n) toast('📚 ' + n + ' recettes de départ chargées'); } catch (e) { }
+    try { const n = await loadStarter(); db.settings.seeded = true; db.settings.starterV = STARTER_VERSION; save(); render(true); if (n) toast('📚 ' + n + ' recettes de départ chargées'); } catch (e) { }
   }
   A.loadStarter = () => confirmSheet('Ajouter les recettes de départ ?', 'Les recettes du livre de départ qui ne sont pas déjà dans ton appli seront ajoutées. Tes recettes et tes modifications sont conservées.', 'Ajouter', async () => {
     try { const n = await loadStarter(); db.settings.seeded = true; save(); toast(n ? plural(n, 'recette ajoutée', 'recettes ajoutées') + ' ✓' : 'Tu as déjà toutes les recettes de départ'); rerender(); }
@@ -1660,6 +1672,7 @@
   seedIfNeeded();
   checkCatalog();
   whatsNew();
+  setTimeout(autoStarter, 1500);
   usageSoon(8000);
   if (restoredFromCopy) setTimeout(() => toast('🛟 Tes recettes ont été restaurées depuis la copie de secours'), 800);
   window.__pm = { db: () => db, ui };
